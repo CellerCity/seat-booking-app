@@ -194,5 +194,20 @@ Deploy to Vercel, set the same environment variables, and the cron in
 `30 3 * * 4` in UTC). Adjust the cron and `TRIP_DAY_OF_WEEK` together if the
 event moves.
 
+Vercel rebuilds on every push to `main`. Two things it does **not** rebuild for:
+
+- **Environment variable changes.** `NEXT_PUBLIC_*` values are inlined into the
+  browser bundle at build time, so edit the variables and then redeploy.
+- **The commit that existed at import time.** If the Deployments tab shows an
+  older SHA than `git log origin/main -1`, a push was missed — *Redeploy* rebuilds
+  the same commit, so push a new one instead.
+
+After deploying, add the domain to Supabase → *Authentication → URL
+Configuration*: as **Site URL**, and under **Redirect URLs** as
+`https://your-app.vercel.app/**`. Without the `/**` suffix the callback path is
+rejected, and Supabase does not report that — it silently substitutes the Site
+URL, so the sign-in link lands on a page with no code to handle it and appears to
+do nothing.
+
 Note: Supabase pauses free projects after about a week of inactivity. Weekly use
 keeps it warm; expect to un-pause it after a long semester break.
