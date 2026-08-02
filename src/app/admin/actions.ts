@@ -5,8 +5,11 @@ import { requireCoordinator } from "@/lib/auth/coordinator";
 import {
   addMember,
   approveMember,
+  archiveMember,
   blockMember,
+  deleteMember,
   demoteCoordinator,
+  restoreMember,
   MemberError,
   promoteToCoordinator,
   rejectMember,
@@ -255,6 +258,50 @@ export async function unblockMemberAction(
     const coordinator = await requireCoordinator();
     await unblockMember(String(formData.get("userId")), coordinator);
     revalidatePath("/admin");
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
+/** Retire someone who has left. Hidden from the roster, kept in the ledger. */
+export async function archiveMemberAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const coordinator = await requireCoordinator();
+    await archiveMember(String(formData.get("userId")), coordinator);
+    revalidatePath("/admin/roster");
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
+export async function restoreMemberAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const coordinator = await requireCoordinator();
+    await restoreMember(String(formData.get("userId")), coordinator);
+    revalidatePath("/admin/roster");
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
+/** Erase an entry that should never have existed. Refused if they have history. */
+export async function deleteMemberAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const coordinator = await requireCoordinator();
+    await deleteMember(String(formData.get("userId")), coordinator);
+    revalidatePath("/admin/roster");
     return { ok: true };
   } catch (e) {
     return toState(e);

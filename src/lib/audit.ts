@@ -1,6 +1,6 @@
 import "server-only";
 import type { db as Db } from "./db";
-import { dueEvents, responseEvents, userEvents } from "./db/schema";
+import { dueEvents, responseEvents, userActionEnum, userEvents } from "./db/schema";
 
 /**
  * Append-only audit writers.
@@ -44,7 +44,9 @@ export async function recordUserEvent(
   tx: Tx,
   event: {
     userId: string;
-    action: "register" | "approve" | "reject" | "block" | "unblock" | "promote" | "demote";
+    // Derived from the enum rather than restated, so adding a value to the
+    // schema cannot leave this list quietly behind.
+    action: (typeof userActionEnum.enumValues)[number];
     fromStatus?: string | null;
     toStatus?: string | null;
     reason?: string | null;

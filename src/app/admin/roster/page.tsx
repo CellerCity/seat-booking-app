@@ -4,12 +4,13 @@ import { requireCoordinatorPage } from "@/lib/auth/coordinator";
 import { db } from "@/lib/db";
 import { responses, users } from "@/lib/db/schema";
 import { getCurrentTrip } from "@/lib/trips";
-import { getPendingMembers } from "@/lib/members";
+import { getArchivedMembers, getPendingMembers } from "@/lib/members";
 import { formatClockTime, formatDateTime } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 import {
   AddMemberForm,
   ApprovalButtons,
+  ArchiveControl,
   BlockControl,
   EditMemberForm,
   RecordResponseToggle,
@@ -27,7 +28,11 @@ export const dynamic = "force-dynamic";
 export default async function RosterPage() {
   const me = await requireCoordinatorPage();
 
-  const [trip, pending] = await Promise.all([getCurrentTrip(), getPendingMembers()]);
+  const [trip, pending, archived] = await Promise.all([
+    getCurrentTrip(),
+    getPendingMembers(),
+    getArchivedMembers(),
+  ]);
 
   const roster = await db
     .select({
@@ -166,6 +171,9 @@ export default async function RosterPage() {
                   isCoordinator={p.role === "coordinator"}
                   isSelf={p.id === me.id}
                 />
+                {p.id !== me.id && (
+                  <ArchiveControl userId={p.id} name={p.name} archived={false} />
+                )}
                 <BlockControl userId={p.id} name={p.name} blocked={false} />
               </div>
             </li>
@@ -184,6 +192,33 @@ export default async function RosterPage() {
                   <div className="text-sm text-slate-500">{p.blockedReason}</div>
                 </div>
                 <BlockControl userId={p.id} name={p.name} blocked />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {archived.length > 0 && (
+        <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="font-semibold">Archived</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            People who have left. Off every count and unable to book, but their past
+            trips and payments are still on the record.
+          </p>
+          <ul className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
+            {archived.map((p) => (
+              <li
+                key={p.id}
+                className="flex flex-wrap items-center justify-between gap-3 py-2"
+              >
+                <div>
+                  <span className="font-medium">{p.name}</span>
+                  <div className="text-sm text-slate-500">
+                    {formatPhone(p.phone)}
+                    {p.affiliation && ` · ${p.affiliation}`}
+                  </div>
+                </div>
+                <ArchiveControl userId={p.id} name={p.name} archived />
               </li>
             ))}
           </ul>

@@ -4,8 +4,11 @@ import { useActionState, useState } from "react";
 import {
   addMemberAction,
   approveMemberAction,
+  archiveMemberAction,
   blockMemberAction,
+  deleteMemberAction,
   demoteMemberAction,
+  restoreMemberAction,
   promoteMemberAction,
   recordResponseAction,
   rejectMemberAction,
@@ -13,6 +16,131 @@ import {
   updateMemberAction,
   type ActionState,
 } from "../actions";
+
+/**
+ * Retiring someone who has left, and the rarer case of erasing a bad entry.
+ *
+ * Archive is offered and delete is not, because archive is almost always the
+ * right answer: a graduating senior's trips and payments are part of other
+ * people's settled numbers. Delete only appears once someone is archived, and
+ * the server refuses it for anyone with any history.
+ */
+export function ArchiveControl({
+  userId,
+  name,
+  archived,
+}: {
+  userId: string;
+  name: string;
+  archived: boolean;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [archiveState, archive, archiving] = useActionState<ActionState, FormData>(
+    archiveMemberAction,
+    {},
+  );
+  const [restoreState, restore, restoring] = useActionState<ActionState, FormData>(
+    restoreMemberAction,
+    {},
+  );
+  const [deleteState, remove, removing] = useActionState<ActionState, FormData>(
+    deleteMemberAction,
+    {},
+  );
+
+  const error = archiveState.error ?? restoreState.error ?? deleteState.error;
+
+  if (archived) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <form action={restore}>
+          <input type="hidden" name="userId" value={userId} />
+          <button
+            type="submit"
+            disabled={restoring}
+            className="rounded-md border border-slate-300 px-2.5 py-1 text-xs disabled:opacity-50 dark:border-slate-700"
+          >
+            {restoring ? "Restoring…" : "Back on roster"}
+          </button>
+        </form>
+        {!confirming ? (
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            className="rounded-md border border-red-300 px-2.5 py-1 text-xs text-red-700 dark:border-red-900 dark:text-red-400"
+          >
+            Delete
+          </button>
+        ) : (
+          <form action={remove} className="flex items-center gap-2">
+            <input type="hidden" name="userId" value={userId} />
+            <span className="text-xs text-red-700 dark:text-red-400">
+              Erase {name} permanently?
+            </span>
+            <button
+              type="submit"
+              disabled={removing}
+              className="rounded-md bg-red-700 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
+            >
+              {removing ? "Deleting…" : "Yes"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              className="rounded-md border border-slate-300 px-2.5 py-1 text-xs dark:border-slate-700"
+            >
+              No
+            </button>
+          </form>
+        )}
+        {error && <span className="text-xs text-red-600">{error}</span>}
+      </div>
+    );
+  }
+
+  if (!confirming) {
+    return (
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="rounded-md border border-slate-300 px-2.5 py-1 text-xs dark:border-slate-700"
+        >
+          Archive
+        </button>
+        {error && <span className="text-xs text-red-600">{error}</span>}
+      </div>
+    );
+  }
+
+  return (
+    <form action={archive} className="rounded-lg border border-slate-300 p-3 dark:border-slate-700">
+      <input type="hidden" name="userId" value={userId} />
+      <p className="text-xs">
+        Archive <strong>{name}</strong>? They come off the roster and out of every
+        count, and can no longer book. Their past trips and payments stay on the
+        record.
+      </p>
+      <div className="mt-2 flex gap-2">
+        <button
+          type="submit"
+          disabled={archiving}
+          className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
+        >
+          {archiving ? "Archiving…" : "Archive"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirming(false)}
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-xs dark:border-slate-700"
+        >
+          Never mind
+        </button>
+      </div>
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+    </form>
+  );
+}
 
 /**
  * Correcting a roster entry.

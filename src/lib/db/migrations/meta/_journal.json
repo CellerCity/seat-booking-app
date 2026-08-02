@@ -15,6 +15,13 @@
       "when": 1785687259129,
       "tag": "0001_misty_dreadnoughts",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785691558360,
+      "tag": "0002_brave_ultron",
+      "breakpoints": true
     }
   ]
 }

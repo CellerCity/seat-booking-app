@@ -77,6 +77,9 @@ export const userActionEnum = pgEnum("user_action", [
   "unblock",
   "promote",
   "demote",
+  /** Left the group. Hidden everywhere, history intact. See members.ts. */
+  "archive",
+  "restore",
 ]);
 
 export const dueStatusEnum = pgEnum("due_status", ["unpaid", "claimed", "verified", "waived"]);

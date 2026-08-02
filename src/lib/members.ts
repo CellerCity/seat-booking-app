@@ -1,7 +1,7 @@
 import "server-only";
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, count, eq, sql } from "drizzle-orm";
 import { db } from "./db";
-import { responses, users, type User } from "./db/schema";
+import { attendance, dues, responses, users, type User } from "./db/schema";
 import { recordUserEvent } from "./audit";
 import { normalizePhone } from "./phone";
 
@@ -112,6 +112,116 @@ export async function blockMember(userId: string, reason: string, coordinator: U
 
 export async function unblockMember(userId: string, coordinator: User) {
   return transition(userId, "approved", "unblock", coordinator);
+}
+
+/** People who have left. Kept out of the roster, kept in the ledger. */
+export async function getArchivedMembers() {
+  return db.select().from(users).where(eq(users.isActive, false)).orderBy(asc(users.name));
+}
+
+/**
+ * Retire someone who has left — the graduating senior, the intern whose stay
+ * ended.
+ *
+ * This is the normal way people leave, and it is not a delete. `is_active` is
+ * already honoured everywhere: they vanish from the roster, drop out of every
+ * headcount, and cannot sign in as either traveller or coordinator. What stays
+ * is history — which trips they travelled on, and what they paid. Deleting the
+ * row would erase that from past trips too, quietly rewriting settled numbers
+ * that other people's shares were calculated from.
+ */
+export async function archiveMember(userId: string, coordinator: User): Promise<User> {
+  if (userId === coordinator.id) throw new MemberError("You cannot archive yourself");
+
+  return db.transaction(async (tx) => {
+    const [current] = await tx.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!current) throw new MemberError("No such person");
+    if (!current.isActive) throw new MemberError(`${current.name} is already archived`);
+
+    if (current.role === "coordinator") {
+      const [{ n }] = await tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(users)
+        .where(sql`${users.role} = 'coordinator' and ${users.isActive} = true`);
+      if (n <= 1) throw new MemberError("That is the last coordinator — promote someone else first");
+    }
+
+    const [updated] = await tx
+      .update(users)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+
+    await recordUserEvent(tx, {
+      userId,
+      action: "archive",
+      toStatus: "archived",
+      reason: `Archived by ${coordinator.name}`,
+      actorId: coordinator.id,
+    });
+
+    return updated;
+  });
+}
+
+export async function restoreMember(userId: string, coordinator: User): Promise<User> {
+  return db.transaction(async (tx) => {
+    const [current] = await tx.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!current) throw new MemberError("No such person");
+    if (current.isActive) throw new MemberError(`${current.name} is already on the roster`);
+
+    const [updated] = await tx
+      .update(users)
+      .set({ isActive: true, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+
+    await recordUserEvent(tx, {
+      userId,
+      action: "restore",
+      toStatus: "active",
+      reason: `Restored by ${coordinator.name}`,
+      actorId: coordinator.id,
+    });
+
+    return updated;
+  });
+}
+
+/**
+ * Erase someone entirely. Only for entries that should never have existed.
+ *
+ * Every table hangs off users with ON DELETE CASCADE, so this takes their
+ * responses, attendance, dues and payment history with it — including their
+ * share of trips that are already settled. That is right for a duplicate row or
+ * a typo'd number and wrong for anyone who has ever travelled, so a person with
+ * any history is refused and must be archived instead.
+ */
+export async function deleteMember(userId: string, coordinator: User): Promise<void> {
+  if (userId === coordinator.id) throw new MemberError("You cannot delete yourself");
+
+  const [current] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!current) throw new MemberError("No such person");
+  if (current.role === "coordinator") {
+    throw new MemberError("Remove their coordinator access first");
+  }
+
+  const [[responseRow], [attendanceRow], [dueRow]] = await Promise.all([
+    db.select({ n: count() }).from(responses).where(eq(responses.userId, userId)),
+    db.select({ n: count() }).from(attendance).where(eq(attendance.userId, userId)),
+    db.select({ n: count() }).from(dues).where(eq(dues.userId, userId)),
+  ]);
+
+  if (attendanceRow.n > 0 || dueRow.n > 0) {
+    throw new MemberError(
+      `${current.name} has travel or payment history — archive them instead of deleting`,
+    );
+  }
+  if (responseRow.n > 0) {
+    throw new MemberError(`${current.name} has responded to trips — archive them instead`);
+  }
+
+  await db.delete(users).where(eq(users.id, userId));
 }
 
 /**

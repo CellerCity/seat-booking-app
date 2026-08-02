@@ -50,3 +50,31 @@ describe("existing formatters still hold", () => {
     expect(formatTripDate("2026-08-07")).toContain("Friday");
   });
 });
+
+describe("the year on a trip date", () => {
+  const inAugust2026 = new Date("2026-08-02T06:00:00Z");
+
+  it("is left off for a trip in the current year", () => {
+    const text = formatTripDate("2026-08-07", inAugust2026);
+    expect(text).toBe("Friday, 7 August");
+    expect(text).not.toContain("2026");
+  });
+
+  it("is shown for a trip in another year", () => {
+    // The case this exists for: booked in December, travelling in January.
+    const inDecember = new Date("2026-12-30T06:00:00Z");
+    expect(formatTripDate("2027-01-02", inDecember)).toBe("Saturday, 2 January 2027");
+  });
+
+  it("is shown for a past year too, which is what history will need", () => {
+    expect(formatTripDate("2025-08-07", inAugust2026)).toContain("2025");
+  });
+
+  it("decides by the IST year, not the server's", () => {
+    // 31 Dec 2026 19:00 UTC is already 1 Jan 2027 in IST. A trip on 2 Jan 2027
+    // is therefore the *same* IST year as "now" and needs no year, even though
+    // a UTC server would say otherwise.
+    const newYearEveUtc = new Date("2026-12-31T19:00:00Z");
+    expect(formatTripDate("2027-01-02", newYearEveUtc)).toBe("Saturday, 2 January");
+  });
+});

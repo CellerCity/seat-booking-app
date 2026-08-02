@@ -5,12 +5,29 @@
 
 export const IST = "Asia/Kolkata";
 
-export function formatTripDate(date: string | Date): string {
+/**
+ * "Friday, 7 August", or "Friday, 2 January 2027" when the trip is not in the
+ * current year.
+ *
+ * The year is noise on a trip a few days away and load-bearing across the New
+ * Year, where "Friday, 2 January" gives a coordinator no way to tell this
+ * January from the last one — a real possibility for a group whose break spans
+ * the boundary. Showing it only when it differs keeps the common case clean.
+ */
+export function formatTripDate(date: string | Date, now: Date = new Date()): string {
   const d = typeof date === "string" ? new Date(`${date}T00:00:00Z`) : date;
+
+  const yearOf = (value: Date) =>
+    new Intl.DateTimeFormat("en-IN", { year: "numeric", timeZone: IST }).format(value);
+
   return new Intl.DateTimeFormat("en-IN", {
     weekday: "long",
     day: "numeric",
     month: "long",
+    // Compared in IST, like everything else here: on 31 December an IST-evening
+    // trip is already next year in UTC terms, and would otherwise be labelled
+    // with a year the traveller has not reached yet.
+    ...(yearOf(d) === yearOf(now) ? {} : { year: "numeric" }),
     timeZone: IST,
   }).format(d);
 }

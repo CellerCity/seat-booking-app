@@ -18,8 +18,16 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-const { promoteToCoordinator, demoteCoordinator, updateMember } = await import("./members");
-const { users, userEvents } = await import("./db/schema");
+const {
+  promoteToCoordinator,
+  demoteCoordinator,
+  updateMember,
+  archiveMember,
+  restoreMember,
+  deleteMember,
+  getRoster,
+} = await import("./members");
+const { users, userEvents, responses, trips } = await import("./db/schema");
 
 async function makeUser(
   name: string,
@@ -78,6 +86,78 @@ describe("promotion", () => {
     const member = await makeUser("Priya", "+919000000001");
 
     await expect(promoteToCoordinator(member.id, "a@x.com", boss)).rejects.toThrow(/already uses/);
+  });
+});
+
+describe("people who leave", () => {
+  it("archives a senior: off the roster, history intact", async () => {
+    const boss = await makeUser("Aman", "+919000000000", "coordinator", "approved", "a@x.com");
+    const senior = await makeUser("Senior", "+919000000010");
+
+    const archived = await archiveMember(senior.id, boss);
+
+    expect(archived.isActive).toBe(false);
+    // Gone from the roster, but the row and everything hanging off it survives.
+    const roster = await getRoster();
+    expect(roster.map((r) => r.id)).not.toContain(senior.id);
+    expect(await testDb.select().from(users).where(eq(users.id, senior.id))).toHaveLength(1);
+
+    const [event] = await testDb.select().from(userEvents).where(eq(userEvents.userId, senior.id));
+    expect(event.action).toBe("archive");
+    expect(event.actorId).toBe(boss.id);
+  });
+
+  it("brings someone back", async () => {
+    const boss = await makeUser("Aman", "+919000000000", "coordinator", "approved", "a@x.com");
+    const senior = await makeUser("Senior", "+919000000010");
+
+    await archiveMember(senior.id, boss);
+    const restored = await restoreMember(senior.id, boss);
+
+    expect(restored.isActive).toBe(true);
+    expect((await getRoster()).map((r) => r.id)).toContain(senior.id);
+  });
+
+  it("will not archive the last coordinator", async () => {
+    const boss = await makeUser("Aman", "+919000000000", "coordinator", "approved", "a@x.com");
+    const other = await makeUser("Other", "+919000000011", "coordinator", "approved", "o@x.com");
+
+    await archiveMember(other.id, boss);
+    await expect(archiveMember(boss.id, other)).rejects.toThrow();
+  });
+
+  it("deletes an entry that has no history at all", async () => {
+    const boss = await makeUser("Aman", "+919000000000", "coordinator", "approved", "a@x.com");
+    const typo = await makeUser("Duplicate", "+919000000012");
+
+    await deleteMember(typo.id, boss);
+    expect(await testDb.select().from(users).where(eq(users.id, typo.id))).toHaveLength(0);
+  });
+
+  it("refuses to delete anyone who has responded to a trip", async () => {
+    const boss = await makeUser("Aman", "+919000000000", "coordinator", "approved", "a@x.com");
+    const rider = await makeUser("Rider", "+919000000013");
+
+    const [trip] = await testDb
+      .insert(trips)
+      .values({
+        eventDate: "2026-08-08",
+        destination: "Venue",
+        departureTime: "07:30",
+        status: "poll_open",
+        linkToken: "tok-archive-test",
+      })
+      .returning();
+    await testDb.insert(responses).values({ tripId: trip.id, userId: rider.id, going: true });
+
+    await expect(deleteMember(rider.id, boss)).rejects.toThrow(/archive them instead/i);
+    expect(await testDb.select().from(users).where(eq(users.id, rider.id))).toHaveLength(1);
+  });
+
+  it("will not let a coordinator archive or delete themselves", async () => {
+    const boss = await makeUser("Aman", "+919000000000", "coordinator", "approved", "a@x.com");
+    await expect(archiveMember(boss.id, boss)).rejects.toThrow(/yourself/);
+    await expect(deleteMember(boss.id, boss)).rejects.toThrow(/yourself/);
   });
 });
 
