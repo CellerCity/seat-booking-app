@@ -21,6 +21,7 @@ vi.mock("@/lib/db", () => ({
 const {
   promoteToCoordinator,
   demoteCoordinator,
+  blockMember,
   updateMember,
   archiveMember,
   restoreMember,
@@ -86,6 +87,35 @@ describe("promotion", () => {
     const member = await makeUser("Priya", "+919000000001");
 
     await expect(promoteToCoordinator(member.id, "a@x.com", boss)).rejects.toThrow(/already uses/);
+  });
+});
+
+describe("blocking cannot strand the group", () => {
+  it("refuses to block a coordinator, which would lock them out of admin", async () => {
+    const one = await makeUser("Aman", "+919000000000", "coordinator", "approved", "a@x.com");
+    const two = await makeUser("Sameer", "+919000000020", "coordinator", "approved", "s@x.com");
+
+    // The exact thing that happened in testing: one coordinator blocked another,
+    // and blocking sets approval_status, which the coordinator check rejects.
+    await expect(blockMember(two.id, "never mind", one)).rejects.toThrow(/coordinator access first/);
+
+    const [after] = await testDb.select().from(users).where(eq(users.id, two.id));
+    expect(after.approvalStatus).toBe("approved");
+  });
+
+  it("allows it once they are no longer a coordinator", async () => {
+    const one = await makeUser("Aman", "+919000000000", "coordinator", "approved", "a@x.com");
+    const two = await makeUser("Sameer", "+919000000020", "coordinator", "approved", "s@x.com");
+
+    await demoteCoordinator(two.id, one);
+    const blocked = await blockMember(two.id, "Genuine reason", one);
+
+    expect(blocked.approvalStatus).toBe("blocked");
+  });
+
+  it("still refuses self-blocking", async () => {
+    const one = await makeUser("Aman", "+919000000000", "coordinator", "approved", "a@x.com");
+    await expect(blockMember(one.id, "why not", one)).rejects.toThrow(/yourself/);
   });
 });
 

@@ -107,6 +107,25 @@ export async function blockMember(userId: string, reason: string, coordinator: U
   if (userId === coordinator.id) {
     throw new MemberError("You cannot block yourself");
   }
+
+  // Blocking is aimed at problem travellers, but it sets approval_status, which
+  // the coordinator check also reads — so blocking a coordinator silently locks
+  // them out of the admin area. One coordinator did this to another within an
+  // hour of the app being shared, using a button that gave no hint it could.
+  // Had the target been the only coordinator, nothing in the app could have
+  // undone it; recovery would have needed the database password.
+  //
+  // Demotion and archiving already refuse to strand the group this way. Removing
+  // a coordinator's access is now always two deliberate steps: take the role
+  // away, then block the person.
+  const [target] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!target) throw new MemberError("No such person");
+  if (target.role === "coordinator") {
+    throw new MemberError(
+      `${target.name} is a coordinator — remove their coordinator access first, then block them`,
+    );
+  }
+
   return transition(userId, "blocked", "block", coordinator, trimmed);
 }
 
