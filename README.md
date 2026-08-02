@@ -88,6 +88,24 @@ npm run dev
 
 - Coordinators: `/admin` (redirects to a magic-link sign-in)
 
+  Sign-in offers Google first and an email link as a fallback. Google needs no
+  inbox, so it is immune to the rate limit below, and matches the roster on the
+  verified email Google returns — the same `users.email` the magic link matches,
+  so nothing migrates when a coordinator switches between them.
+
+  **Enabling Google** (once per Supabase project):
+
+  1. Google Cloud Console → *APIs & Services → Credentials* → *Create
+     credentials → OAuth client ID* → **Web application**.
+  2. Authorised redirect URI: `https://<project-ref>.supabase.co/auth/v1/callback`
+     — Supabase's callback, not the app's. Copy it from the Google provider page
+     in Supabase rather than typing it.
+  3. Supabase → *Authentication → Sign In / Providers → Google*: enable, paste
+     the client ID and secret, save.
+
+  A coordinator whose Google address is not on their roster row is told exactly
+  that, with a sign-out button, rather than being bounced to a blank form.
+
   Supabase's built-in email service allows only a few messages an hour, which
   runs out quickly while testing — and testing on a phone needs that device's
   origin in *Authentication → URL Configuration → Redirect URLs* (with a `/**`

@@ -64,6 +64,40 @@ export async function getCurrentCoordinator(): Promise<User | null> {
   return user;
 }
 
+/**
+ * Who is signed in, and whether that gets them anything.
+ *
+ * `getCurrentCoordinator` collapses "nobody is signed in" and "signed in with
+ * an email that isn't a coordinator" into the same null, which is right for a
+ * guard and useless for the sign-in page. Someone who has just authenticated
+ * with Google and lands back on a blank login form has no way to tell that the
+ * app worked perfectly and simply doesn't know their address.
+ */
+export async function getCoordinatorSession(): Promise<{
+  email: string | null;
+  coordinator: User | null;
+}> {
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user: authUser },
+  } = await supabase.auth.getUser();
+
+  const email = authUser?.email?.toLowerCase() ?? null;
+  if (!email) return { email: null, coordinator: null };
+
+  const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+
+  const usable =
+    user && user.isActive && user.role === "coordinator" && user.approvalStatus === "approved";
+
+  return { email, coordinator: usable ? user : null };
+}
+
+export async function signOutCoordinator(): Promise<void> {
+  const supabase = await getSupabaseServerClient();
+  await supabase.auth.signOut();
+}
+
 export class NotAuthorizedError extends Error {
   constructor(message = "Coordinators only") {
     super(message);
