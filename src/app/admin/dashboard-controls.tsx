@@ -378,12 +378,28 @@ export function TripLink({ url, message }: { url: string; message: string }) {
   const link = useCopy(url);
   const invite = useCopy(message);
 
+  // The link is built from the address this page was opened on, which is right
+  // almost always and catastrophic once: a link copied from localhost opens
+  // nothing on anyone else's phone, and does so silently — it looks perfectly
+  // valid right up until fifty people tap it.
+  const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(
+    url,
+  );
+
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
       <p className="text-sm font-medium">Traveller link</p>
       <p className="mt-1 text-xs text-slate-500">
         Paste this in the group. Anyone with it can book — no sign-in, no app.
       </p>
+
+      {isLocal && (
+        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          <strong>This link only works on this machine.</strong> You&apos;re viewing the
+          dashboard on a local address, so the link points back here. Open the
+          dashboard on the deployed site and copy it there before sharing.
+        </p>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-lg bg-slate-100 px-3 py-2 text-xs dark:bg-slate-800">
