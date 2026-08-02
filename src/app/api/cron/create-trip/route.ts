@@ -28,6 +28,8 @@ export async function GET(request: NextRequest) {
   const departureTime = process.env.TRIP_DEPARTURE_TIME ?? "07:30";
   const destination = process.env.TRIP_DESTINATION ?? "Event venue";
   const closesTime = process.env.POLL_CLOSES_TIME ?? "20:00";
+  // 1 = the day before the trip (an evening deadline), 0 = the morning of it.
+  const closesDaysBefore = Number(process.env.POLL_CLOSES_DAYS_BEFORE ?? "1");
 
   const eventDate = nextOccurrence(dayOfWeek);
   const eventDateStr = isoDate(eventDate);
@@ -51,9 +53,22 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ action: "noop", trip: summary(existing) });
   }
 
-  // Poll closes the evening before, in IST. Advisory only — it drives the
-  // countdown and never disables booking.
-  const pollClosesAt = istDateTime(addDays(eventDate, -1), closesTime);
+  // Advisory only — this drives the countdown and never disables booking.
+  const pollClosesAt = istDateTime(addDays(eventDate, -closesDaysBefore), closesTime);
+
+  // A deadline already in the past means POLL_CLOSES_DAYS_BEFORE, POLL_CLOSES_TIME
+  // and the cron schedule in vercel.json disagree — e.g. an 08:00 deadline set
+  // for the day before, on a poll the cron opens at 09:00. Booking still works,
+  // since lock is the only hard gate, but every traveller sees an expired
+  // countdown. Say so plainly rather than shipping a dead clock.
+  const misconfigured = pollClosesAt <= new Date();
+  if (misconfigured) {
+    console.warn(
+      `[create-trip] poll_closes_at (${pollClosesAt.toISOString()}) is already past. ` +
+        `Check POLL_CLOSES_DAYS_BEFORE=${closesDaysBefore}, POLL_CLOSES_TIME=${closesTime} ` +
+        `against the cron schedule in vercel.json.`,
+    );
+  }
 
   const [created] = await db
     .insert(trips)
@@ -68,7 +83,13 @@ export async function GET(request: NextRequest) {
     })
     .returning();
 
-  return NextResponse.json({ action: "created", trip: summary(created) });
+  return NextResponse.json({
+    action: "created",
+    trip: summary(created),
+    ...(misconfigured
+      ? { warning: "poll_closes_at is already in the past — check the poll schedule settings" }
+      : {}),
+  });
 }
 
 function summary(trip: typeof trips.$inferSelect) {
