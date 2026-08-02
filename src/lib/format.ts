@@ -44,6 +44,38 @@ export function formatClockTime(date: Date): string {
   }).format(date);
 }
 
+/** The IST calendar day of an instant, e.g. "2026-08-07", for comparing two. */
+function istDay(date: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: IST,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+/**
+ * A respond-by time that says which day it means.
+ *
+ * "by 8:00 am" is only unambiguous if the deadline is today. The regular run's
+ * deadline is the morning of the trip, but a trip added by hand can have one
+ * any time at all, so the day is included whenever it isn't today — and the
+ * date once it is far enough out that a weekday alone could mean either week.
+ */
+export function formatDeadline(target: Date, now: Date = new Date()): string {
+  const time = formatClockTime(target);
+  if (istDay(target) === istDay(now)) return time;
+
+  const sixDays = 6 * 24 * 60 * 60 * 1000;
+  if (target.getTime() - now.getTime() > sixDays) return formatDateTime(target);
+
+  const weekday = new Intl.DateTimeFormat("en-IN", {
+    weekday: "long",
+    timeZone: IST,
+  }).format(target);
+  return `${time} on ${weekday}`;
+}
+
 /** "in 6h 12m", "2h ago". Returns null when the difference is not worth showing. */
 export function relativeTime(target: Date, now: Date = new Date()): string {
   const diffMs = target.getTime() - now.getTime();

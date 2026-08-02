@@ -5,7 +5,13 @@ import { db } from "@/lib/db";
 import { responses, users } from "@/lib/db/schema";
 import { getHeadcount, getResponseFeed, getUpcomingTrips } from "@/lib/trips";
 import { countPendingMembers } from "@/lib/members";
-import { formatClockTime, formatTime, formatTripDate, relativeTime } from "@/lib/format";
+import {
+  formatClockTime,
+  formatDeadline,
+  formatTime,
+  formatTripDate,
+  relativeTime,
+} from "@/lib/format";
 import { getBaseUrl } from "@/lib/base-url";
 import {
   CancelTripButton,
@@ -75,7 +81,7 @@ export default async function DashboardPage({
   const inviteMessage =
     `${formatTripDate(trip.eventDate)} — ${trip.destination}\n` +
     `Leaving ${formatTime(trip.departureTime)}\n` +
-    (trip.pollClosesAt ? `Let us know by ${formatClockTime(trip.pollClosesAt)}\n` : "") +
+    (trip.pollClosesAt ? `Let us know by ${formatDeadline(trip.pollClosesAt)}\n` : "") +
     `\nTap to book your seat:\n${travellerUrl}`;
 
   // For a coordinator passing the number to another coordinator.
@@ -177,7 +183,7 @@ export default async function DashboardPage({
 
         {trip.pollClosesAt && !locked && (
           <p className="mt-3 text-sm text-slate-500">
-            Poll closes {formatClockTime(trip.pollClosesAt)} ({relativeTime(trip.pollClosesAt)})
+            Poll closes {formatDeadline(trip.pollClosesAt)} ({relativeTime(trip.pollClosesAt)})
             — advisory only, booking stays open until you lock.
           </p>
         )}

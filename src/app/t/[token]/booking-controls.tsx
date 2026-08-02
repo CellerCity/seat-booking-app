@@ -8,6 +8,14 @@ type Props = {
   going: boolean;
   locked: boolean;
   held: boolean;
+  /**
+   * The trip's own respond-by time, already formatted in IST, or null when it
+   * has none or it has passed. Passed in rather than assumed: the regular run
+   * has a deadline the night before, but a one-off added on the day does not,
+   * and telling someone the count goes to the contractor "tomorrow" when the
+   * trip leaves in three hours is worse than saying nothing.
+   */
+  deadlineLabel: string | null;
 };
 
 /**
@@ -18,7 +26,7 @@ type Props = {
  * already hired, so the group pays for a seat nobody sits in — the traveller
  * should be told that plainly, once, and then trusted to decide.
  */
-export function BookingControls({ token, going, locked, held }: Props) {
+export function BookingControls({ token, going, locked, held, deadlineLabel }: Props) {
   const [confirming, setConfirming] = useState(false);
 
   const [bookState, runBook, booking] = useActionState<ActionState, FormData>(bookAction, {});
@@ -81,7 +89,9 @@ export function BookingControls({ token, going, locked, held }: Props) {
           <p className="text-sm text-amber-900 dark:text-amber-200">
             {locked
               ? "Cabs are already booked for this count. Dropping out now means everyone else splits the same cost between fewer people."
-              : "Let us know as early as you can — the count goes to the cab contractor tomorrow."}
+              : deadlineLabel
+                ? `Let us know before ${deadlineLabel} if you can — after that the count goes to the cab contractor.`
+                : "Let us know as early as you can — the count goes to the cab contractor before the trip."}
           </p>
           <div className="flex gap-2">
             <form action={runWithdraw} className="flex-1">

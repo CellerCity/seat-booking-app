@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { getCurrentTraveller, isBlocked, isPending } from "@/lib/auth/traveller";
 import { getResponse, getTripByToken } from "@/lib/trips";
-import { formatClockTime, formatTime, formatTripDate, relativeTime } from "@/lib/format";
+import { formatDeadline, formatTime, formatTripDate, relativeTime } from "@/lib/format";
 import { BookingControls } from "./booking-controls";
 import { IdentifyForm } from "./identify-form";
 
@@ -43,6 +43,13 @@ export default async function TripPage({
   const locked = trip.lockedAt !== null;
   const response = user ? await getResponse(trip.id, user.id) : null;
 
+  // Null once it has passed: a deadline in the past is not something to hurry
+  // someone towards, and this trip may not have one at all.
+  const deadlineLabel =
+    trip.pollClosesAt && trip.pollClosesAt > new Date()
+      ? formatDeadline(trip.pollClosesAt)
+      : null;
+
   return (
     <Shell>
       <header className="mb-6">
@@ -53,11 +60,11 @@ export default async function TripPage({
           {trip.destination} · leaves {formatTime(trip.departureTime)}
         </p>
 
-        {trip.pollClosesAt && !locked && !cancelled && (
+        {deadlineLabel && !locked && !cancelled && (
           <p className="mt-2 text-sm text-slate-500">
-            Let us know by {formatClockTime(trip.pollClosesAt)}{" "}
+            Let us know by {deadlineLabel}{" "}
             <span className="text-slate-400">
-              ({relativeTime(trip.pollClosesAt)})
+              ({relativeTime(trip.pollClosesAt!)})
             </span>
           </p>
         )}
@@ -81,6 +88,7 @@ export default async function TripPage({
             going={response?.going ?? false}
             locked={locked}
             held={isPending(user)}
+            deadlineLabel={deadlineLabel}
           />
 
           <p className="text-center text-xs text-slate-400">
