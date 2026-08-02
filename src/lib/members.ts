@@ -114,6 +114,177 @@ export async function unblockMember(userId: string, coordinator: User) {
   return transition(userId, "approved", "unblock", coordinator);
 }
 
+/**
+ * Correct a roster entry.
+ *
+ * Details get typed in a hurry — a misspelt name, the wrong department, a phone
+ * number off by a digit — and until now the only fix was a database edit. This
+ * changes who someone *is*, never what they are allowed to do: role, approval
+ * status and the blocklist all have their own audited paths and are untouched
+ * here.
+ *
+ * A changed phone number is a real identity change, since travellers identify
+ * by phone, so it is normalised and checked for collisions the same way a new
+ * member is.
+ */
+export async function updateMember(
+  userId: string,
+  input: {
+    name: string;
+    phone: string;
+    memberType?: "regular" | "guest";
+    affiliation?: string;
+    email?: string;
+  },
+): Promise<User> {
+  const name = input.name.trim();
+  if (name.length < 2) throw new MemberError("Please enter a name");
+
+  const phone = normalizePhone(input.phone);
+  const email = input.email?.trim().toLowerCase() || null;
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    throw new MemberError("That email doesn't look right");
+  }
+
+  return db.transaction(async (tx) => {
+    const [current] = await tx.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!current) throw new MemberError("No such person");
+
+    const [phoneClash] = await tx.select().from(users).where(eq(users.phone, phone)).limit(1);
+    if (phoneClash && phoneClash.id !== userId) {
+      throw new MemberError(`${phoneClash.name} already uses that number`);
+    }
+
+    if (email) {
+      const [emailClash] = await tx.select().from(users).where(eq(users.email, email)).limit(1);
+      if (emailClash && emailClash.id !== userId) {
+        throw new MemberError(`${emailClash.name} already uses that email`);
+      }
+    }
+
+    // A coordinator signs in by email, so clearing it would lock them out of an
+    // account they still hold. Removing access is demotion's job, not editing's.
+    if (current.role === "coordinator" && !email) {
+      throw new MemberError("A coordinator needs an email — remove their access first");
+    }
+
+    const [updated] = await tx
+      .update(users)
+      .set({
+        name,
+        phone,
+        email,
+        memberType: input.memberType ?? current.memberType,
+        affiliation: input.affiliation?.trim() || null,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+      .returning();
+
+    return updated;
+  });
+}
+
+/**
+ * Make someone a coordinator.
+ *
+ * This is the handover feature: without it, the only way to add a coordinator is
+ * a database edit, which means the project dies with whoever holds the
+ * credentials. See SPEC §13.
+ *
+ * An email is required and is the whole point — coordinators sign in by email,
+ * whether by Google or a magic link, and are matched to this row by it. A
+ * coordinator without one is an account nobody can ever use. Only approved
+ * members can be promoted: pending, rejected and blocked people are exactly the
+ * ones a coordinator has not vouched for.
+ */
+export async function promoteToCoordinator(
+  userId: string,
+  email: string,
+  coordinator: User,
+): Promise<User> {
+  const address = email.trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) {
+    throw new MemberError("A coordinator needs a valid email — it is how they sign in");
+  }
+
+  return db.transaction(async (tx) => {
+    const [current] = await tx.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!current) throw new MemberError("No such person");
+    if (current.role === "coordinator") throw new MemberError(`${current.name} already is one`);
+    if (current.approvalStatus !== "approved") {
+      throw new MemberError("Approve them as a member first");
+    }
+
+    const [clash] = await tx.select().from(users).where(eq(users.email, address)).limit(1);
+    if (clash && clash.id !== userId) {
+      throw new MemberError(`${clash.name} already uses that email`);
+    }
+
+    const [updated] = await tx
+      .update(users)
+      .set({ role: "coordinator", email: address, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+
+    await recordUserEvent(tx, {
+      userId,
+      action: "promote",
+      fromStatus: "traveller",
+      toStatus: "coordinator",
+      reason: `Promoted by ${coordinator.name}`,
+      actorId: coordinator.id,
+    });
+
+    return updated;
+  });
+}
+
+/**
+ * Step someone back down to traveller.
+ *
+ * Refuses to remove the last coordinator: an app with none cannot be
+ * administered by anyone, and recovering from that needs database access —
+ * precisely what this feature exists to avoid needing.
+ */
+export async function demoteCoordinator(userId: string, coordinator: User): Promise<User> {
+  if (userId === coordinator.id) {
+    throw new MemberError("You cannot remove your own coordinator access");
+  }
+
+  return db.transaction(async (tx) => {
+    const [current] = await tx.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!current) throw new MemberError("No such person");
+    if (current.role !== "coordinator") throw new MemberError(`${current.name} is not a coordinator`);
+
+    const [{ n }] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(users)
+      .where(sql`${users.role} = 'coordinator' and ${users.isActive} = true`);
+
+    if (n <= 1) throw new MemberError("That is the last coordinator — promote someone else first");
+
+    const [updated] = await tx
+      .update(users)
+      // The email stays: it is how they are identified if promoted again, and
+      // dropping it would silently orphan their sign-in history.
+      .set({ role: "traveller", updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+
+    await recordUserEvent(tx, {
+      userId,
+      action: "demote",
+      fromStatus: "coordinator",
+      toStatus: "traveller",
+      reason: `Demoted by ${coordinator.name}`,
+      actorId: coordinator.id,
+    });
+
+    return updated;
+  });
+}
+
 /** Guests are interns and short-stay visitors. UG cross-over travellers are `regular`. */
 export async function addMember(
   input: { name: string; phone: string; memberType?: "regular" | "guest"; affiliation?: string },

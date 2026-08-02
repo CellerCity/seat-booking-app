@@ -11,7 +11,9 @@ import {
   AddMemberForm,
   ApprovalButtons,
   BlockControl,
+  EditMemberForm,
   RecordResponseToggle,
+  RoleControls,
 } from "./roster-controls";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +25,7 @@ export const dynamic = "force-dynamic";
  * requireCoordinator() and is never reachable from a traveller link.
  */
 export default async function RosterPage() {
-  await requireCoordinatorPage();
+  const me = await requireCoordinatorPage();
 
   const [trip, pending] = await Promise.all([getCurrentTrip(), getPendingMembers()]);
 
@@ -32,6 +34,8 @@ export default async function RosterPage() {
       id: users.id,
       name: users.name,
       phone: users.phone,
+      email: users.email,
+      role: users.role,
       memberType: users.memberType,
       affiliation: users.affiliation,
       approvalStatus: users.approvalStatus,
@@ -113,6 +117,11 @@ export default async function RosterPage() {
             <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0">
                 <span className="font-medium">{p.name}</span>
+                {p.role === "coordinator" && (
+                  <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                    coordinator
+                  </span>
+                )}
                 {p.memberType === "guest" && (
                   <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
                     guest
@@ -121,6 +130,7 @@ export default async function RosterPage() {
                 <div className="text-sm text-slate-500">
                   {formatPhone(p.phone)}
                   {p.affiliation && ` · ${p.affiliation}`}
+                  {p.role === "coordinator" && p.email && ` · ${p.email}`}
                 </div>
                 {p.going && p.firstRespondedAt && (
                   <div className="text-xs text-emerald-700 dark:text-emerald-400">
@@ -130,7 +140,7 @@ export default async function RosterPage() {
                 )}
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 {trip && (
                   <RecordResponseToggle
                     tripId={trip.id}
@@ -138,6 +148,24 @@ export default async function RosterPage() {
                     going={p.going ?? false}
                   />
                 )}
+                <EditMemberForm
+                  member={{
+                    id: p.id,
+                    name: p.name,
+                    phone: p.phone,
+                    email: p.email,
+                    memberType: p.memberType,
+                    affiliation: p.affiliation,
+                    isCoordinator: p.role === "coordinator",
+                  }}
+                />
+                <RoleControls
+                  userId={p.id}
+                  name={p.name}
+                  email={p.email}
+                  isCoordinator={p.role === "coordinator"}
+                  isSelf={p.id === me.id}
+                />
                 <BlockControl userId={p.id} name={p.name} blocked={false} />
               </div>
             </li>

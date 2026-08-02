@@ -5,6 +5,7 @@ import {
   cancelTripAction,
   createTripAction,
   decideLateAction,
+  deleteTripAction,
   lockTripAction,
   openPollAction,
   type ActionState,
@@ -172,6 +173,74 @@ export function CancelTripButton({ tripId, label }: { tripId: string; label: str
         </button>
       </div>
       {state.error && <p className="mt-2 text-sm text-red-600">{state.error}</p>}
+    </form>
+  );
+}
+
+/**
+ * Removing a trip outright — for test runs and mistaken entries.
+ *
+ * Cancelling is the normal act and keeps the record; this throws it away. It
+ * says how many responses go with it, because that is the part people forget is
+ * attached. Trips with money or attendance against them are refused server-side.
+ */
+export function DeleteTripButton({
+  tripId,
+  label,
+  responses,
+}: {
+  tripId: string;
+  label: string;
+  responses: number;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [state, run, pending] = useActionState<ActionState, FormData>(deleteTripAction, {});
+
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        onClick={() => setConfirming(true)}
+        className="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:text-red-400"
+      >
+        Delete
+      </button>
+    );
+  }
+
+  return (
+    <form
+      action={run}
+      className="w-full rounded-lg border border-red-300 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950"
+    >
+      <input type="hidden" name="tripId" value={tripId} />
+      <p className="text-sm text-red-900 dark:text-red-200">
+        Permanently delete <strong>{label}</strong>
+        {responses > 0 && (
+          <>
+            {" "}
+            and {responses} response{responses === 1 ? "" : "s"} to it
+          </>
+        )}
+        ? This cannot be undone. To keep the record instead, cancel it.
+      </p>
+      <div className="mt-3 flex gap-2">
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-lg bg-red-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {pending ? "Deleting…" : "Delete permanently"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirming(false)}
+          className="rounded-lg border border-slate-300 px-4 py-2 text-sm dark:border-slate-700"
+        >
+          Keep it
+        </button>
+      </div>
+      {state.error && <p className="mt-2 text-sm text-red-700">{state.error}</p>}
     </form>
   );
 }

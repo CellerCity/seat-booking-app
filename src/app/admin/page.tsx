@@ -16,6 +16,7 @@ import { getBaseUrl } from "@/lib/base-url";
 import {
   CancelTripButton,
   CopyCountButton,
+  DeleteTripButton,
   LateDecisionButtons,
   LockButton,
   NewTripForm,
@@ -133,6 +134,13 @@ export default async function DashboardPage({
             <CancelTripButton
               tripId={trip.id}
               label={`${formatTripDate(trip.eventDate)}, ${formatTime(trip.departureTime)}`}
+            />
+          )}
+          {trip.status !== "settled" && (
+            <DeleteTripButton
+              tripId={trip.id}
+              label={`${formatTripDate(trip.eventDate)}, ${formatTime(trip.departureTime)}`}
+              responses={count.total}
             />
           )}
         </div>

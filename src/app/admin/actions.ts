@@ -6,15 +6,19 @@ import {
   addMember,
   approveMember,
   blockMember,
+  demoteCoordinator,
   MemberError,
+  promoteToCoordinator,
   rejectMember,
   unblockMember,
+  updateMember,
 } from "@/lib/members";
 import {
   bookSeat,
   cancelTrip,
   createTrip,
   decideLateBooking,
+  deleteTrip,
   lockTrip,
   TripError,
   withdraw,
@@ -136,6 +140,22 @@ export async function cancelTripAction(
   }
 }
 
+/** Remove a trip entirely — housekeeping for test runs and mistakes. */
+export async function deleteTripAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    await requireCoordinator();
+    const trip = await tripById(String(formData.get("tripId")));
+    await deleteTrip(trip);
+    revalidatePath("/admin");
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
 /** Accept or decline a post-lock booking. Always a person's call. */
 export async function decideLateAction(
   _prev: ActionState,
@@ -235,6 +255,60 @@ export async function unblockMemberAction(
     const coordinator = await requireCoordinator();
     await unblockMember(String(formData.get("userId")), coordinator);
     revalidatePath("/admin");
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
+/** Fix a roster entry — a misspelt name, the wrong affiliation, a bad number. */
+export async function updateMemberAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    await requireCoordinator();
+    await updateMember(String(formData.get("userId")), {
+      name: String(formData.get("name") ?? ""),
+      phone: String(formData.get("phone") ?? ""),
+      memberType: formData.get("memberType") === "guest" ? "guest" : "regular",
+      affiliation: String(formData.get("affiliation") ?? ""),
+      email: String(formData.get("email") ?? ""),
+    });
+    revalidatePath("/admin/roster");
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
+/** Handover: make another member a coordinator, or step one back down. */
+export async function promoteMemberAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const coordinator = await requireCoordinator();
+    await promoteToCoordinator(
+      String(formData.get("userId")),
+      String(formData.get("email") ?? ""),
+      coordinator,
+    );
+    revalidatePath("/admin/roster");
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
+export async function demoteMemberAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const coordinator = await requireCoordinator();
+    await demoteCoordinator(String(formData.get("userId")), coordinator);
+    revalidatePath("/admin/roster");
     return { ok: true };
   } catch (e) {
     return toState(e);

@@ -1,8 +1,18 @@
 import "server-only";
 import { randomBytes } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, sql } from "drizzle-orm";
 import { db } from "./db";
-import { responseEvents, responses, trips, users, type Trip, type User } from "./db/schema";
+import {
+  attendance,
+  dues,
+  responseEvents,
+  responses,
+  settlements,
+  trips,
+  users,
+  type Trip,
+  type User,
+} from "./db/schema";
 import { recordResponseEvent } from "./audit";
 
 /**
@@ -79,6 +89,8 @@ export type HeadcountBreakdown = {
   awaitingApproval: number;
   /** Withdrew after the count was locked — cabs are already hired for them. */
   withdrewAfterLock: number;
+  /** Everyone who responded either way, for "this will remove N responses". */
+  total: number;
 };
 
 /**
@@ -104,7 +116,13 @@ export async function getHeadcount(trip: Trip): Promise<HeadcountBreakdown> {
     .innerJoin(users, eq(responses.userId, users.id))
     .where(eq(responses.tripId, trip.id));
 
-  const count = { confirmed: 0, awaitingLateDecision: 0, awaitingApproval: 0, withdrewAfterLock: 0 };
+  const count = {
+    confirmed: 0,
+    awaitingLateDecision: 0,
+    awaitingApproval: 0,
+    withdrewAfterLock: 0,
+    total: rows.length,
+  };
 
   for (const r of rows) {
     if (!r.isActive || r.approvalStatus === "blocked" || r.approvalStatus === "rejected") continue;
@@ -375,6 +393,42 @@ export async function cancelTrip(trip: Trip, reason: string, coordinator: User):
     .returning();
 
   return updated;
+}
+
+/**
+ * Remove a trip and its responses entirely.
+ *
+ * This is for tidying up test runs and mistaken entries, not for managing real
+ * ones — a trip that happened and was called off should be cancelled, which
+ * keeps the record and the reason. Cancelling is the normal act; deleting is
+ * the housekeeping one.
+ *
+ * Every table hangs off trips with ON DELETE CASCADE, so removing a row here
+ * silently takes attendance, dues and the settlement with it. That is fine for
+ * a trip nobody travelled on and unacceptable for one anybody paid for, so the
+ * money and attendance records are checked first and refuse the delete rather
+ * than being quietly destroyed. Responses and their audit events do go — that
+ * is the point of the feature.
+ */
+export async function deleteTrip(trip: Trip): Promise<void> {
+  if (trip.status === "settled") {
+    throw new TripError("That trip is settled — its record has to stay");
+  }
+
+  const [[dueRow], [attendanceRow], [settlementRow]] = await Promise.all([
+    db.select({ n: count() }).from(dues).where(eq(dues.tripId, trip.id)),
+    db.select({ n: count() }).from(attendance).where(eq(attendance.tripId, trip.id)),
+    db.select({ n: count() }).from(settlements).where(eq(settlements.tripId, trip.id)),
+  ]);
+
+  if (dueRow.n > 0 || settlementRow.n > 0) {
+    throw new TripError("That trip has money against it — cancel it instead of deleting");
+  }
+  if (attendanceRow.n > 0) {
+    throw new TripError("People are marked as having travelled on that trip — cancel it instead");
+  }
+
+  await db.delete(trips).where(eq(trips.id, trip.id));
 }
 
 /** A coordinator accepting or declining a post-lock booking. Always a person's call. */

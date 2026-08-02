@@ -28,13 +28,14 @@ const {
   cancelTrip,
   createTrip,
   decideLateBooking,
+  deleteTrip,
   getHeadcount,
   getUpcomingTrips,
   lockTrip,
   withdraw,
   generateLinkToken,
 } = await import("./trips");
-const { users, trips, responses, responseEvents } = await import("./db/schema");
+const { users, trips, responses, responseEvents, attendance, dues } = await import("./db/schema");
 
 async function makeTrip(status: "poll_open" | "draft" = "poll_open") {
   const [trip] = await testDb
@@ -358,6 +359,46 @@ describe("adding and cancelling trips", () => {
     const trip = await makeTrip();
     await expect(cancelTrip(trip, "  ", coordinator)).rejects.toThrow(/reason/i);
     await expect(cancelTrip(trip, "ok", coordinator)).rejects.toThrow(/reason/i);
+  });
+
+  it("deletes a test trip and its responses", async () => {
+    const coordinator = await makeUser("Coord", "+919000000000", "approved", "coordinator");
+    const trip = await makeTrip();
+    const rider = await makeUser("Rider", "+919000000024");
+    await bookSeat(trip, rider);
+
+    await deleteTrip(trip);
+
+    expect(await testDb.select().from(trips).where(eq(trips.id, trip.id))).toHaveLength(0);
+    // Responses and their audit events cascade away with it.
+    expect(await testDb.select().from(responses).where(eq(responses.tripId, trip.id))).toHaveLength(0);
+    expect(
+      await testDb.select().from(responseEvents).where(eq(responseEvents.tripId, trip.id)),
+    ).toHaveLength(0);
+    // The person stays on the roster.
+    expect(await testDb.select().from(users).where(eq(users.id, rider.id))).toHaveLength(1);
+    expect(coordinator.id).toBeTruthy();
+  });
+
+  it("refuses to delete a trip people are recorded as having travelled on", async () => {
+    const coordinator = await makeUser("Coord", "+919000000000", "approved", "coordinator");
+    const trip = await makeTrip();
+    const rider = await makeUser("Rider", "+919000000025");
+    await testDb
+      .insert(attendance)
+      .values({ tripId: trip.id, userId: rider.id, boarded: true, markedBy: coordinator.id });
+
+    await expect(deleteTrip(trip)).rejects.toThrow(/travelled/i);
+    expect(await testDb.select().from(trips).where(eq(trips.id, trip.id))).toHaveLength(1);
+  });
+
+  it("refuses to delete a trip with money against it", async () => {
+    const trip = await makeTrip();
+    const rider = await makeUser("Rider", "+919000000026");
+    await testDb.insert(dues).values({ tripId: trip.id, userId: rider.id, amount: 150 });
+
+    await expect(deleteTrip(trip)).rejects.toThrow(/money/i);
+    expect(await testDb.select().from(trips).where(eq(trips.id, trip.id))).toHaveLength(1);
   });
 
   it("will not cancel the same trip twice", async () => {
