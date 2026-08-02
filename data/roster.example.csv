@@ -1,0 +1,7 @@
+name,phone,role,member_type,affiliation,email
+Asha Menon,9876543210,coordinator,regular,M.Tech CSE,asha@example.com
+Rahul Verma,9876543211,coordinator,regular,M.Tech ECE,rahul@example.com
+Priya Nair,9876543212,traveller,regular,M.Tech CSE,
+Karthik Iyer,9876543213,traveller,regular,PhD Physics,
+Sneha Reddy,9876543214,traveller,regular,UG CSE,
+Tom Fischer,9876543215,traveller,guest,Visiting intern,

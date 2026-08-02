@@ -1,0 +1,166 @@
+import Link from "next/link";
+import { and, eq, sql } from "drizzle-orm";
+import { requireCoordinatorPage } from "@/lib/auth/coordinator";
+import { db } from "@/lib/db";
+import { responses, users } from "@/lib/db/schema";
+import { getCurrentTrip } from "@/lib/trips";
+import { getPendingMembers } from "@/lib/members";
+import { formatClockTime, formatDateTime } from "@/lib/format";
+import { formatPhone } from "@/lib/phone";
+import {
+  AddMemberForm,
+  ApprovalButtons,
+  BlockControl,
+  RecordResponseToggle,
+} from "./roster-controls";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * Roster, approval queue and blocklist.
+ *
+ * This page holds every phone number in the group, so it sits behind
+ * requireCoordinator() and is never reachable from a traveller link.
+ */
+export default async function RosterPage() {
+  await requireCoordinatorPage();
+
+  const [trip, pending] = await Promise.all([getCurrentTrip(), getPendingMembers()]);
+
+  const roster = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      phone: users.phone,
+      memberType: users.memberType,
+      affiliation: users.affiliation,
+      approvalStatus: users.approvalStatus,
+      blockedReason: users.blockedReason,
+      going: responses.going,
+      firstRespondedAt: responses.firstRespondedAt,
+      source: responses.source,
+    })
+    .from(users)
+    // Join only this trip's responses. Without the trip predicate the join
+    // would fan out across every past trip and show stale answers as current.
+    .leftJoin(
+      responses,
+      and(
+        eq(responses.userId, users.id),
+        trip ? eq(responses.tripId, trip.id) : sql`false`,
+      ),
+    )
+    .where(eq(users.isActive, true))
+    .orderBy(users.name);
+
+  const active = roster.filter((r) => r.approvalStatus === "approved");
+  const blocked = roster.filter((r) => r.approvalStatus === "blocked");
+
+  return (
+    <div className="space-y-6">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold">Roster</h1>
+          <p className="text-sm text-slate-500">
+            {active.length} approved
+            {blocked.length > 0 && ` · ${blocked.length} blocked`}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <AddMemberForm />
+          <Link href="/admin" className="text-sm text-slate-500 underline">
+            ← Dashboard
+          </Link>
+        </div>
+      </header>
+
+      {pending.length > 0 && (
+        <section className="rounded-xl border border-blue-300 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
+          <h2 className="font-semibold text-blue-900 dark:text-blue-200">
+            Waiting for approval ({pending.length})
+          </h2>
+          <p className="mt-1 text-sm text-blue-800 dark:text-blue-300">
+            These people signed up through the link. They don&apos;t count toward the
+            headcount until approved — approving is one-time, they&apos;re never asked
+            again.
+          </p>
+          <ul className="mt-3 space-y-2">
+            {pending.map((p) => (
+              <li
+                key={p.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 dark:bg-slate-900"
+              >
+                <div>
+                  <span className="font-medium">{p.name}</span>
+                  <span className="ml-2 text-sm text-slate-500">
+                    {formatPhone(p.phone)}
+                  </span>
+                  <span className="ml-2 text-xs text-slate-400">
+                    signed up {formatDateTime(p.createdAt)}
+                    {p.hasBooked && " · already booked"}
+                  </span>
+                </div>
+                <ApprovalButtons userId={p.id} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+          {active.map((p) => (
+            <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <div className="min-w-0">
+                <span className="font-medium">{p.name}</span>
+                {p.memberType === "guest" && (
+                  <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                    guest
+                  </span>
+                )}
+                <div className="text-sm text-slate-500">
+                  {formatPhone(p.phone)}
+                  {p.affiliation && ` · ${p.affiliation}`}
+                </div>
+                {p.going && p.firstRespondedAt && (
+                  <div className="text-xs text-emerald-700 dark:text-emerald-400">
+                    going · responded {formatClockTime(p.firstRespondedAt)}
+                    {p.source === "coordinator" && " (entered by coordinator)"}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3">
+                {trip && (
+                  <RecordResponseToggle
+                    tripId={trip.id}
+                    userId={p.id}
+                    going={p.going ?? false}
+                  />
+                )}
+                <BlockControl userId={p.id} name={p.name} blocked={false} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {blocked.length > 0 && (
+        <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="font-semibold">Blocked</h2>
+          <ul className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
+            {blocked.map((p) => (
+              <li key={p.id} className="flex items-center justify-between gap-3 py-2">
+                <div>
+                  <span className="font-medium">{p.name}</span>
+                  <div className="text-sm text-slate-500">{p.blockedReason}</div>
+                </div>
+                <BlockControl userId={p.id} name={p.name} blocked />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
+}

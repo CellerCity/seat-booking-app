@@ -30,8 +30,16 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — never commit real secrets; the example template is committed
 .env*
+!.env.example
+
+# real roster data: ~50 people's names and phone numbers. Never commit PII.
+/data/*.csv
+!/data/roster.example.csv
+
+# exported ledger backups
+/exports
 
 # vercel
 .vercel

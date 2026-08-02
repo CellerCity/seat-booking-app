@@ -1,0 +1,110 @@
+import { notFound } from "next/navigation";
+import { getCurrentTraveller, isBlocked, isPending } from "@/lib/auth/traveller";
+import { getResponse, getTripByToken } from "@/lib/trips";
+import { formatClockTime, formatTime, formatTripDate, relativeTime } from "@/lib/format";
+import { BookingControls } from "./booking-controls";
+import { IdentifyForm } from "./identify-form";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * The traveller's whole app: one page, one tap.
+ *
+ * Travellers see only their own state — never the roster, never the headcount,
+ * never anyone else's dues. That isolation is enforced here by simply not
+ * fetching any of it, not by hiding it in the markup.
+ */
+export default async function TripPage({
+  params,
+}: {
+  params: Promise<{ token: string }>;
+}) {
+  const { token } = await params;
+  const trip = await getTripByToken(token);
+  if (!trip) notFound();
+
+  const user = await getCurrentTraveller();
+
+  if (isBlocked(user)) {
+    return (
+      <Shell>
+        <div className="rounded-xl border border-slate-200 p-6 text-center dark:border-slate-800">
+          <h1 className="text-lg font-semibold">Your access has been removed</h1>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+            Please speak to a coordinator.
+          </p>
+        </div>
+      </Shell>
+    );
+  }
+
+  const cancelled = trip.status === "cancelled";
+  const notOpenYet = trip.status === "draft";
+  const locked = trip.lockedAt !== null;
+  const response = user ? await getResponse(trip.id, user.id) : null;
+
+  return (
+    <Shell>
+      <header className="mb-6">
+        <h1 className="text-2xl font-bold tracking-tight">
+          {formatTripDate(trip.eventDate)}
+        </h1>
+        <p className="mt-1 text-slate-600 dark:text-slate-400">
+          {trip.destination} · leaves {formatTime(trip.departureTime)}
+        </p>
+
+        {trip.pollClosesAt && !locked && !cancelled && (
+          <p className="mt-2 text-sm text-slate-500">
+            Let us know by {formatClockTime(trip.pollClosesAt)}{" "}
+            <span className="text-slate-400">
+              ({relativeTime(trip.pollClosesAt)})
+            </span>
+          </p>
+        )}
+      </header>
+
+      {cancelled ? (
+        <Notice tone="muted">This trip has been cancelled.</Notice>
+      ) : notOpenYet ? (
+        <Notice tone="muted">
+          The poll hasn&apos;t opened yet. Check back closer to the day.
+        </Notice>
+      ) : !user ? (
+        <IdentifyForm />
+      ) : (
+        <div className="space-y-6">
+          <BookingControls
+            token={token}
+            going={response?.going ?? false}
+            locked={locked}
+            held={isPending(user)}
+          />
+
+          <p className="text-center text-xs text-slate-400">
+            Signed in as {user.name}
+          </p>
+        </div>
+      )}
+    </Shell>
+  );
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <main className="mx-auto min-h-dvh w-full max-w-md px-5 py-10">{children}</main>
+  );
+}
+
+function Notice({
+  children,
+  tone,
+}: {
+  children: React.ReactNode;
+  tone: "muted" | "warn";
+}) {
+  const styles =
+    tone === "warn"
+      ? "bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+      : "bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-300";
+  return <div className={`rounded-xl px-4 py-4 text-sm ${styles}`}>{children}</div>;
+}
