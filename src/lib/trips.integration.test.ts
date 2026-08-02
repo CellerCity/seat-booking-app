@@ -23,8 +23,17 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-const { bookSeat, decideLateBooking, getHeadcount, lockTrip, withdraw, generateLinkToken } =
-  await import("./trips");
+const {
+  bookSeat,
+  cancelTrip,
+  createTrip,
+  decideLateBooking,
+  getHeadcount,
+  getUpcomingTrips,
+  lockTrip,
+  withdraw,
+  generateLinkToken,
+} = await import("./trips");
 const { users, trips, responses, responseEvents } = await import("./db/schema");
 
 async function makeTrip(status: "poll_open" | "draft" = "poll_open") {
@@ -272,6 +281,90 @@ describe("the audit trail", () => {
       .from(responseEvents)
       .where(eq(responseEvents.tripId, trip.id));
     expect(events).toHaveLength(1);
+  });
+});
+
+describe("adding and cancelling trips", () => {
+  const dayAfter = (n: number) => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+
+  it("adds an extra trip in the same week, open for booking straight away", async () => {
+    const coordinator = await makeUser("Coord", "+919000000000", "approved", "coordinator");
+    await makeTrip(); // the regular weekly run
+
+    const extra = await createTrip(
+      { eventDate: dayAfter(3), destination: "Second run", departureTime: "18:00" },
+      coordinator,
+    );
+
+    expect(extra.status).toBe("poll_open");
+    expect(extra.createdBy).toBe(coordinator.id);
+    expect(extra.linkToken).not.toBe("");
+
+    // Both are live at once, and a booking on one does not touch the other.
+    const rider = await makeUser("Rider", "+919000000021");
+    await bookSeat(extra, rider);
+    expect((await getHeadcount(extra)).confirmed).toBe(1);
+
+    const upcoming = await getUpcomingTrips();
+    expect(upcoming.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("refuses a second trip on the same date and time", async () => {
+    const coordinator = await makeUser("Coord", "+919000000000", "approved", "coordinator");
+    const date = dayAfter(4);
+    await createTrip({ eventDate: date, destination: "A", departureTime: "07:30" }, coordinator);
+
+    await expect(
+      createTrip({ eventDate: date, destination: "B", departureTime: "07:30" }, coordinator),
+    ).rejects.toThrow(/already exists/);
+
+    // A different time that day is a legitimate second run.
+    await expect(
+      createTrip({ eventDate: date, destination: "B", departureTime: "18:00" }, coordinator),
+    ).resolves.toMatchObject({ status: "poll_open" });
+  });
+
+  it("refuses a trip in the past", async () => {
+    const coordinator = await makeUser("Coord", "+919000000000", "approved", "coordinator");
+    await expect(
+      createTrip({ eventDate: dayAfter(-1), destination: "X", departureTime: "07:30" }, coordinator),
+    ).rejects.toThrow(/already passed/);
+  });
+
+  it("cancels a trip with a reason and stops further booking", async () => {
+    const coordinator = await makeUser("Coord", "+919000000000", "approved", "coordinator");
+    const trip = await makeTrip();
+    const rider = await makeUser("Rider", "+919000000022");
+    await bookSeat(trip, rider);
+
+    const cancelled = await cancelTrip(trip, "Heavy rain", coordinator);
+
+    expect(cancelled.status).toBe("cancelled");
+    expect(cancelled.cancelReason).toBe("Heavy rain");
+    expect(cancelled.cancelledBy).toBe(coordinator.id);
+    expect(cancelled.cancelledAt).toBeInstanceOf(Date);
+
+    // Nobody can book onto a trip that is not running.
+    const latecomer = await makeUser("Late", "+919000000023");
+    await expect(bookSeat(cancelled, latecomer)).rejects.toThrow(/cancelled/i);
+  });
+
+  it("requires a reason, because travellers are shown it", async () => {
+    const coordinator = await makeUser("Coord", "+919000000000", "approved", "coordinator");
+    const trip = await makeTrip();
+    await expect(cancelTrip(trip, "  ", coordinator)).rejects.toThrow(/reason/i);
+    await expect(cancelTrip(trip, "ok", coordinator)).rejects.toThrow(/reason/i);
+  });
+
+  it("will not cancel the same trip twice", async () => {
+    const coordinator = await makeUser("Coord", "+919000000000", "approved", "coordinator");
+    const trip = await makeTrip();
+    const cancelled = await cancelTrip(trip, "Weather", coordinator);
+    await expect(cancelTrip(cancelled, "Again", coordinator)).rejects.toThrow(/Already cancelled/);
   });
 });
 

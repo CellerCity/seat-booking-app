@@ -142,6 +142,18 @@ export const trips = pgTable(
     /** One number, because one number is what the contractor is told. */
     lockedCount: integer("locked_count"),
 
+    /** Called off — weather, a cancelled event, too few people. One-way: a trip
+     *  that is back on is a new trip, so the cancellation stays on the record
+     *  rather than being quietly reversed under everyone who already saw it. */
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledBy: uuid("cancelled_by").references(() => users.id),
+    /** Shown to travellers, not just coordinators. "Cancelled" without a reason
+     *  sends fifty people to WhatsApp to ask why. */
+    cancelReason: text("cancel_reason"),
+
+    /** Who put this trip in the calendar. Null for the ones the cron creates. */
+    createdBy: uuid("created_by").references(() => users.id),
+
     /** Pasted into WhatsApp. ≥128 bits of randomness: forwardable, not guessable. */
     linkToken: text("link_token").notNull().unique(),
     notes: text("notes"),

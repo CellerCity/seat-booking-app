@@ -64,7 +64,10 @@ export default async function TripPage({
       </header>
 
       {cancelled ? (
-        <Notice tone="muted">This trip has been cancelled.</Notice>
+        <Notice tone="warn">
+          <strong className="block">This trip has been cancelled.</strong>
+          {trip.cancelReason && <span className="mt-1 block">{trip.cancelReason}</span>}
+        </Notice>
       ) : notOpenYet ? (
         <Notice tone="muted">
           The poll hasn&apos;t opened yet. Check back closer to the day.

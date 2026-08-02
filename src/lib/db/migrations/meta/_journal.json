@@ -8,6 +8,13 @@
       "when": 1785627140296,
       "tag": "0000_bent_yellow_claw",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785687259129,
+      "tag": "0001_misty_dreadnoughts",
+      "breakpoints": true
     }
   ]
 }

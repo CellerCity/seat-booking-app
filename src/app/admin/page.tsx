@@ -2,15 +2,16 @@ import Link from "next/link";
 import { and, eq, gt } from "drizzle-orm";
 import { requireCoordinatorPage } from "@/lib/auth/coordinator";
 import { db } from "@/lib/db";
-import { cabTypes, responses, users } from "@/lib/db/schema";
-import { getCurrentTrip, getHeadcount, getResponseFeed } from "@/lib/trips";
+import { responses, users } from "@/lib/db/schema";
+import { getHeadcount, getResponseFeed, getUpcomingTrips } from "@/lib/trips";
 import { countPendingMembers } from "@/lib/members";
-import { planCabs } from "@/lib/cost";
 import { formatClockTime, formatTime, formatTripDate, relativeTime } from "@/lib/format";
 import {
+  CancelTripButton,
   CopyCountButton,
   LateDecisionButtons,
   LockButton,
+  NewTripForm,
   OpenPollButton,
 } from "./dashboard-controls";
 
@@ -22,28 +23,44 @@ export const dynamic = "force-dynamic";
  * One number is authoritative. The other three figures exist precisely so they
  * are never silently folded into it.
  */
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ trip?: string }>;
+}) {
   await requireCoordinatorPage();
 
-  const trip = await getCurrentTrip();
+  const upcoming = await getUpcomingTrips();
+  const selectedId = (await searchParams).trip;
+
+  // More than one trip can be live at once — the weekly run plus a one-off — so
+  // the dashboard picks the soonest and lets the coordinator switch.
+  const trip = upcoming.find((t) => t.id === selectedId) ?? upcoming[0] ?? null;
+
+  const tripDefaults = {
+    destination: trip?.destination ?? process.env.TRIP_DESTINATION ?? "Event venue",
+    departureTime: (trip?.departureTime ?? process.env.TRIP_DEPARTURE_TIME ?? "07:30").slice(0, 5),
+  };
+
   if (!trip) {
     return (
-      <EmptyState>
-        No trip scheduled yet. The weekly cron creates one automatically.
-      </EmptyState>
+      <div className="space-y-4">
+        <EmptyState>
+          No trips scheduled. The weekly cron adds one automatically — or add one now.
+        </EmptyState>
+        <NewTripForm defaults={tripDefaults} />
+      </div>
     );
   }
 
-  const [count, feed, pendingApprovals, [defaultCab]] = await Promise.all([
+  const [count, feed, pendingApprovals] = await Promise.all([
     getHeadcount(trip),
     getResponseFeed(trip.id, 40),
     countPendingMembers(),
-    db.select().from(cabTypes).where(eq(cabTypes.isActive, true)).limit(1),
   ]);
 
-  const capacity = defaultCab?.capacity ?? 12;
-  const { cabsNeeded, seatsFree } = planCabs(count.confirmed, capacity);
   const locked = trip.lockedAt !== null;
+  const cancelled = trip.status === "cancelled";
 
   const lateBookings = locked ? await getLateBookings(trip.id, trip.lockedAt!) : [];
   const withdrawals = locked ? await getPostLockWithdrawals(trip.id, trip.lockedAt!) : [];
@@ -55,6 +72,29 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {upcoming.length > 1 && (
+        <nav className="flex flex-wrap gap-2">
+          {upcoming.map((t) => {
+            const active = t.id === trip.id;
+            return (
+              <Link
+                key={t.id}
+                href={`/admin?trip=${t.id}`}
+                className={
+                  "rounded-lg border px-3 py-1.5 text-sm " +
+                  (active
+                    ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900"
+                    : "border-slate-300 text-slate-600 dark:border-slate-700 dark:text-slate-400")
+                }
+              >
+                {formatTripDate(t.eventDate)} · {formatTime(t.departureTime)}
+                {t.status === "cancelled" && " · cancelled"}
+              </Link>
+            );
+          })}
+        </nav>
+      )}
+
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">{formatTripDate(trip.eventDate)}</h1>
@@ -63,14 +103,39 @@ export default async function DashboardPage() {
             <span className="capitalize">{trip.status.replace("_", " ")}</span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <CopyCountButton text={whatsappSummary} />
+        <div className="flex flex-wrap items-center gap-2">
+          {!cancelled && <CopyCountButton text={whatsappSummary} />}
           {trip.status === "draft" && <OpenPollButton tripId={trip.id} />}
           {trip.status === "poll_open" && (
             <LockButton tripId={trip.id} count={count.confirmed} />
           )}
+          {!cancelled && trip.status !== "settled" && (
+            <CancelTripButton
+              tripId={trip.id}
+              label={`${formatTripDate(trip.eventDate)}, ${formatTime(trip.departureTime)}`}
+            />
+          )}
         </div>
       </header>
+
+      {cancelled && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
+          <p className="font-semibold text-amber-900 dark:text-amber-200">
+            This trip is cancelled
+          </p>
+          {trip.cancelReason && (
+            <p className="mt-1 text-sm text-amber-800 dark:text-amber-300">
+              {trip.cancelReason}
+            </p>
+          )}
+          <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+            Travellers opening the link see this reason.
+            {trip.cancelledAt && ` Cancelled ${formatClockTime(trip.cancelledAt)}.`}
+          </p>
+        </div>
+      )}
+
+      <NewTripForm defaults={tripDefaults} />
 
       {pendingApprovals > 0 && (
         <Link
@@ -89,24 +154,10 @@ export default async function DashboardPage() {
         </p>
         <p className="mt-1 text-6xl font-bold tabular-nums">{count.confirmed}</p>
 
-        <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm">
-          <span className="text-slate-600 dark:text-slate-400">
-            <strong className="tabular-nums">{cabsNeeded}</strong>{" "}
-            {defaultCab?.name ?? "cab"}
-            {cabsNeeded === 1 ? "" : "s"} at {capacity} seats
-          </span>
-          <span
-            className={
-              seatsFree === 0
-                ? "font-medium text-amber-700 dark:text-amber-400"
-                : "text-slate-600 dark:text-slate-400"
-            }
-          >
-            {seatsFree === 0
-              ? "Last cab is full — one more person means another cab"
-              : `${seatsFree} seat${seatsFree === 1 ? "" : "s"} free in the last cab`}
-          </span>
-        </div>
+        {/* No suggested cab mix here. What the contractor actually sends varies
+            week to week, so a computed "N cabs, M seats free" reads as fact
+            while being a guess — and the wrong kind of guess to have on screen
+            during the call. The count is the number; the cabs are his answer. */}
 
         {trip.pollClosesAt && !locked && (
           <p className="mt-3 text-sm text-slate-500">
@@ -128,9 +179,8 @@ export default async function DashboardPage() {
             Late additions ({lateBookings.length})
           </h2>
           <p className="mt-1 text-sm text-amber-800 dark:text-amber-300">
-            {seatsFree > 0
-              ? `${seatsFree} seat${seatsFree === 1 ? "" : "s"} free, so these cost nothing extra.`
-              : "The last cab is full — accepting means hiring another cab."}
+            Booked after the count was locked. Accepting is your call — check with
+            the contractor whether there is room.
           </p>
           <ul className="mt-3 space-y-2">
             {lateBookings.map((b) => (

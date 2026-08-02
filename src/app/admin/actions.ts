@@ -10,7 +10,15 @@ import {
   rejectMember,
   unblockMember,
 } from "@/lib/members";
-import { bookSeat, decideLateBooking, lockTrip, TripError, withdraw } from "@/lib/trips";
+import {
+  bookSeat,
+  cancelTrip,
+  createTrip,
+  decideLateBooking,
+  lockTrip,
+  TripError,
+  withdraw,
+} from "@/lib/trips";
 import { db } from "@/lib/db";
 import { trips, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -76,6 +84,51 @@ export async function openPollAction(
       .set({ status: "poll_open", pollOpenedAt: new Date(), updatedAt: new Date() })
       .where(eq(trips.id, trip.id));
 
+    revalidatePath("/admin");
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
+/** Add a one-off trip — an extra event, or one the cron does not cover. */
+export async function createTripAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const coordinator = await requireCoordinator();
+    const closesRaw = String(formData.get("pollClosesAt") ?? "").trim();
+
+    await createTrip(
+      {
+        eventDate: String(formData.get("eventDate") ?? ""),
+        destination: String(formData.get("destination") ?? ""),
+        departureTime: String(formData.get("departureTime") ?? ""),
+        // datetime-local gives a wall-clock string with no zone. Coordinators
+        // are in IST and so is every trip, so it is pinned rather than left to
+        // the server's timezone, which on Vercel is UTC.
+        pollClosesAt: closesRaw ? new Date(`${closesRaw}:00+05:30`) : null,
+      },
+      coordinator,
+    );
+
+    revalidatePath("/admin");
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
+/** Call a trip off. One-way, and the reason is shown to travellers. */
+export async function cancelTripAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const coordinator = await requireCoordinator();
+    const trip = await tripById(String(formData.get("tripId")));
+    await cancelTrip(trip, String(formData.get("reason") ?? ""), coordinator);
     revalidatePath("/admin");
     return { ok: true };
   } catch (e) {

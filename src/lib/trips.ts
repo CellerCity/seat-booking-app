@@ -40,6 +40,27 @@ export async function getCurrentTrip(): Promise<Trip | null> {
   return trip ?? null;
 }
 
+/**
+ * Every trip still in play, soonest first.
+ *
+ * There can be more than one in a week — the regular Friday run plus a one-off —
+ * so the dashboard shows a list rather than assuming a single current trip.
+ * Cancelled trips stay visible until their date passes: a coordinator needs to
+ * see that Saturday was called off, not have it silently vanish.
+ */
+export async function getUpcomingTrips(): Promise<Trip[]> {
+  return db
+    .select()
+    .from(trips)
+    .where(sql`${trips.status} <> 'settled' and ${trips.eventDate} >= current_date`)
+    .orderBy(trips.eventDate, trips.departureTime);
+}
+
+export async function getTripById(id: string): Promise<Trip | null> {
+  const [trip] = await db.select().from(trips).where(eq(trips.id, id)).limit(1);
+  return trip ?? null;
+}
+
 export async function getResponse(tripId: string, userId: string) {
   const [response] = await db
     .select()
@@ -256,6 +277,98 @@ export async function lockTrip(trip: Trip, coordinator: User): Promise<Trip> {
       lockedAt: new Date(),
       lockedBy: coordinator.id,
       lockedCount: confirmed,
+      updatedAt: new Date(),
+    })
+    .where(eq(trips.id, trip.id))
+    .returning();
+
+  return updated;
+}
+
+/**
+ * A one-off trip a coordinator adds by hand.
+ *
+ * The weekly run is created by the cron; this covers the extra event, the
+ * rescheduled one, and the week the timings differ. It opens the poll straight
+ * away — a trip added manually is one someone wants people to respond to now.
+ */
+export async function createTrip(
+  input: {
+    eventDate: string;
+    destination: string;
+    departureTime: string;
+    pollClosesAt?: Date | null;
+  },
+  coordinator: User,
+): Promise<Trip> {
+  const eventDate = input.eventDate.trim();
+  const destination = input.destination.trim();
+  const departureTime = input.departureTime.trim();
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate)) throw new TripError("Pick a date");
+  if (!destination) throw new TripError("Where is it going?");
+  if (!/^\d{2}:\d{2}/.test(departureTime)) throw new TripError("Pick a departure time");
+
+  // Comparing date strings is safe here: ISO dates sort chronologically, and
+  // this deliberately uses the server's day rather than the browser's.
+  if (eventDate < new Date().toISOString().slice(0, 10)) {
+    throw new TripError("That date has already passed");
+  }
+
+  const clash = await db
+    .select()
+    .from(trips)
+    .where(
+      and(
+        eq(trips.eventDate, eventDate),
+        eq(trips.departureTime, departureTime),
+        sql`${trips.status} <> 'cancelled'`,
+      ),
+    )
+    .limit(1);
+
+  if (clash.length > 0) {
+    throw new TripError("A trip already exists that day at that time");
+  }
+
+  const [trip] = await db
+    .insert(trips)
+    .values({
+      eventDate,
+      destination,
+      departureTime,
+      status: "poll_open",
+      pollOpenedAt: new Date(),
+      pollClosesAt: input.pollClosesAt ?? null,
+      linkToken: generateLinkToken(),
+      createdBy: coordinator.id,
+    })
+    .returning();
+
+  return trip;
+}
+
+/**
+ * Call a trip off — weather, the event itself cancelled, too few people.
+ *
+ * One-way on purpose. Un-cancelling would rewrite what travellers were already
+ * told; if the trip is back on, it is a new trip with a new link. The reason is
+ * required and shown to travellers, because "cancelled" with no explanation
+ * sends fifty people to WhatsApp to ask why.
+ */
+export async function cancelTrip(trip: Trip, reason: string, coordinator: User): Promise<Trip> {
+  const note = reason.trim();
+  if (note.length < 3) throw new TripError("Give a short reason — travellers see it");
+  if (trip.status === "cancelled") throw new TripError("Already cancelled");
+  if (trip.status === "settled") throw new TripError("That trip is already settled");
+
+  const [updated] = await db
+    .update(trips)
+    .set({
+      status: "cancelled",
+      cancelledAt: new Date(),
+      cancelledBy: coordinator.id,
+      cancelReason: note,
       updatedAt: new Date(),
     })
     .where(eq(trips.id, trip.id))
