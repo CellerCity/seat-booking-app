@@ -271,20 +271,70 @@ export function NewTripForm({ defaults }: { defaults: { destination: string; dep
   );
 }
 
-export function CopyCountButton({ text }: { text: string }) {
+function useCopy(text: string) {
   const [copied, setCopied] = useState(false);
+  return {
+    copied,
+    copy: async () => {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    },
+  };
+}
+
+export function CopyCountButton({ text }: { text: string }) {
+  const { copied, copy } = useCopy(text);
 
   return (
     <button
       type="button"
-      onClick={async () => {
-        await navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      }}
+      onClick={copy}
       className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700"
     >
-      {copied ? "Copied" : "Copy for WhatsApp"}
+      {copied ? "Copied" : "Copy count"}
     </button>
+  );
+}
+
+/**
+ * The link travellers actually need, and the message to paste with it.
+ *
+ * This is the one thing a coordinator has to do for the app to be used at all,
+ * so it sits on the dashboard in full rather than being assembled by hand from
+ * a token. The message deliberately carries no headcount: it is going into a
+ * group of fifty people, and counts are a coordinator's business.
+ */
+export function TripLink({ url, message }: { url: string; message: string }) {
+  const link = useCopy(url);
+  const invite = useCopy(message);
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+      <p className="text-sm font-medium">Traveller link</p>
+      <p className="mt-1 text-xs text-slate-500">
+        Paste this in the group. Anyone with it can book — no sign-in, no app.
+      </p>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-lg bg-slate-100 px-3 py-2 text-xs dark:bg-slate-800">
+          {url}
+        </code>
+        <button
+          type="button"
+          onClick={link.copy}
+          className="rounded-lg border border-slate-300 px-3 py-2 text-sm dark:border-slate-700"
+        >
+          {link.copied ? "Copied" : "Copy link"}
+        </button>
+        <button
+          type="button"
+          onClick={invite.copy}
+          className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white dark:bg-slate-100 dark:text-slate-900"
+        >
+          {invite.copied ? "Copied" : "Copy message"}
+        </button>
+      </div>
+    </section>
   );
 }

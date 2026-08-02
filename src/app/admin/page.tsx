@@ -6,6 +6,7 @@ import { responses, users } from "@/lib/db/schema";
 import { getHeadcount, getResponseFeed, getUpcomingTrips } from "@/lib/trips";
 import { countPendingMembers } from "@/lib/members";
 import { formatClockTime, formatTime, formatTripDate, relativeTime } from "@/lib/format";
+import { getBaseUrl } from "@/lib/base-url";
 import {
   CancelTripButton,
   CopyCountButton,
@@ -13,6 +14,7 @@ import {
   LockButton,
   NewTripForm,
   OpenPollButton,
+  TripLink,
 } from "./dashboard-controls";
 
 export const dynamic = "force-dynamic";
@@ -65,7 +67,19 @@ export default async function DashboardPage({
   const lateBookings = locked ? await getLateBookings(trip.id, trip.lockedAt!) : [];
   const withdrawals = locked ? await getPostLockWithdrawals(trip.id, trip.lockedAt!) : [];
 
-  const whatsappSummary =
+  const baseUrl = await getBaseUrl();
+  const travellerUrl = `${baseUrl}/t/${trip.linkToken}`;
+
+  // For the group chat. No headcount in here on purpose — this goes to fifty
+  // people, and the count is a coordinator's number.
+  const inviteMessage =
+    `${formatTripDate(trip.eventDate)} — ${trip.destination}\n` +
+    `Leaving ${formatTime(trip.departureTime)}\n` +
+    (trip.pollClosesAt ? `Let us know by ${formatClockTime(trip.pollClosesAt)}\n` : "") +
+    `\nTap to book your seat:\n${travellerUrl}`;
+
+  // For a coordinator passing the number to another coordinator.
+  const countSummary =
     `${formatTripDate(trip.eventDate)} — ${trip.destination}\n` +
     `Leaving ${formatTime(trip.departureTime)}\n` +
     `Count: ${count.confirmed}${locked ? " (locked)" : ""}`;
@@ -104,7 +118,7 @@ export default async function DashboardPage({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {!cancelled && <CopyCountButton text={whatsappSummary} />}
+          {!cancelled && <CopyCountButton text={countSummary} />}
           {trip.status === "draft" && <OpenPollButton tripId={trip.id} />}
           {trip.status === "poll_open" && (
             <LockButton tripId={trip.id} count={count.confirmed} />
@@ -134,6 +148,8 @@ export default async function DashboardPage({
           </p>
         </div>
       )}
+
+      {!cancelled && <TripLink url={travellerUrl} message={inviteMessage} />}
 
       <NewTripForm defaults={tripDefaults} />
 

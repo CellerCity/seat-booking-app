@@ -101,8 +101,9 @@ npm run dev
   Before launch, configure custom SMTP in Supabase so coordinator sign-in does
   not depend on the shared, rate-limited sender.
 
-- Travellers: `/t/<link_token>` — the token is on the dashboard's *Copy for
-  WhatsApp* button once a trip exists
+- Travellers: `/t/<link_token>` — the dashboard shows the full link for the
+  selected trip, with *Copy link* and *Copy message* buttons. Each trip has its
+  own link, so a new trip means a new link to paste.
 
 To create the first trip without waiting for the cron:
 
