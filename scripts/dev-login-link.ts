@@ -50,12 +50,28 @@ async function main() {
     process.exit(1);
   }
 
+  // Point straight at our own callback with the token hash, rather than handing
+  // back Supabase's /auth/v1/verify URL. That URL obeys the redirect allowlist,
+  // and when the allowlist rejects the callback path Supabase does not fail —
+  // it silently swaps in the Site URL, landing the token on a page that cannot
+  // use it. The link then appears to do nothing at all. Skipping the redirect
+  // removes that failure mode from the one tool you reach for when sign-in is
+  // already broken.
+  const link = `${origin}/admin/auth/callback?token_hash=${data.properties.hashed_token}&type=magiclink`;
+
   console.log(`\nSign-in link for ${email}  (single use, expires in ~1 hour)\n`);
-  console.log(data.properties.action_link);
-  console.log(
-    `\nOpen it in the browser you want signed in. The redirect origin (${origin})` +
-      `\nmust be listed in Supabase -> Authentication -> URL Configuration -> Redirect URLs.\n`,
-  );
+  console.log(link);
+  console.log(`\nOpen it in the browser you want signed in. The app must be running at ${origin}.`);
+
+  if (data.properties.redirect_to && !data.properties.redirect_to.includes("/admin/auth/callback")) {
+    console.log(
+      `\nNote: Supabase rewrote its own redirect to ${data.properties.redirect_to},` +
+        `\nwhich means ${origin}/** is not in Redirect URLs under Authentication ->` +
+        `\nURL Configuration. The link above works regardless, but emailed sign-in` +
+        `\nlinks will not until that is fixed.`,
+    );
+  }
+  console.log();
 }
 
 main();
