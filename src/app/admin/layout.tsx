@@ -32,6 +32,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             Seat booking
           </Link>
           <div className="flex items-center gap-3">
+            <Link href="/admin/trips" className="text-sm text-slate-500 hover:underline">
+              Trips
+            </Link>
             <Link href="/admin/roster" className="text-sm text-slate-500 hover:underline">
               Roster
             </Link>

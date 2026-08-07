@@ -56,6 +56,13 @@ export default async function DashboardPage({
       <div className="space-y-4">
         <EmptyState>
           No trips scheduled. The weekly cron adds one automatically — or add one now.
+          {/* The day after a trip there is nothing upcoming, and settling up is
+              exactly what a coordinator is here to do. */}
+          <div className="mt-2">
+            <Link href="/admin/trips" className="text-sm underline">
+              Past trips →
+            </Link>
+          </div>
         </EmptyState>
         <NewTripForm defaults={tripDefaults} />
       </div>
@@ -125,6 +132,14 @@ export default async function DashboardPage({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {!cancelled && (
+            <Link
+              href={`/admin/trips/${trip.id}`}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
+            >
+              Settle up
+            </Link>
+          )}
           {!cancelled && <CopyCountButton text={countSummary} />}
           {trip.status === "draft" && <OpenPollButton tripId={trip.id} />}
           {trip.status === "poll_open" && (

@@ -6,6 +6,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import { eq } from "drizzle-orm";
 import * as schema from "../src/lib/db/schema";
 import { normalizePhone, PhoneError } from "../src/lib/phone";
+import { JoiningYearError, parseJoiningYear } from "../src/lib/joining-year";
 
 config({ path: ".env.local" });
 
@@ -16,9 +17,11 @@ config({ path: ".env.local" });
  * they are never asked to wait for a coordinator. Only strangers who arrive
  * through the WhatsApp link land in the approval queue.
  *
- * Expects data/roster.csv:  name,phone,role,member_type,affiliation,email
- * (only name and phone are required). That file is gitignored — it holds ~50
- * real phone numbers and must never be committed.
+ * Expects data/roster.csv:
+ *   name,phone,role,member_type,affiliation,email,joining_year
+ * (only name and phone are required). Columns are matched by header name, so
+ * the order does not matter and missing ones are simply left empty. That file
+ * is gitignored — it holds ~50 real phone numbers and must never be committed.
  */
 
 const CSV_PATH = resolve(process.cwd(), "data/roster.csv");
@@ -30,6 +33,7 @@ type Row = {
   memberType?: string;
   affiliation?: string;
   email?: string;
+  joiningYear?: string;
 };
 
 function parseCsv(text: string): Row[] {
@@ -59,6 +63,14 @@ function parseCsv(text: string): Row[] {
       memberType: idx("member_type") > -1 ? cells[idx("member_type")] : undefined,
       affiliation: idx("affiliation") > -1 ? cells[idx("affiliation")] : undefined,
       email: idx("email") > -1 ? cells[idx("email")] : undefined,
+      // Accepts either spelling, because a spreadsheet filled in by fifty
+      // people will contain both.
+      joiningYear:
+        idx("joining_year") > -1
+          ? cells[idx("joining_year")]
+          : idx("year_of_joining") > -1
+            ? cells[idx("year_of_joining")]
+            : undefined,
     };
   });
 }
@@ -109,6 +121,17 @@ async function main() {
       continue;
     }
 
+    // A bad year is worth a warning but never worth dropping the person over —
+    // their phone number is the part that matters.
+    let joiningYear: number | null = null;
+    try {
+      joiningYear = parseJoiningYear(row.joiningYear);
+    } catch (e) {
+      problems.push(
+        `${row.name}: ${e instanceof JoiningYearError ? e.message : "bad year"} — added without it`,
+      );
+    }
+
     const [existing] = await db
       .select()
       .from(schema.users)
@@ -127,6 +150,7 @@ async function main() {
       role: row.role === "coordinator" ? "coordinator" : "traveller",
       memberType: row.memberType === "guest" ? "guest" : "regular",
       affiliation: row.affiliation || null,
+      joiningYear,
       // Known people. The approval queue is only for strangers from the link.
       approvalStatus: "approved",
     });
@@ -136,8 +160,15 @@ async function main() {
   console.log(`\nRoster: ${added} added, ${skipped} already present`);
 
   if (problems.length > 0) {
-    console.log(`\n${problems.length} row(s) skipped:`);
+    console.log(`\n${problems.length} row(s) need a look:`);
     for (const p of problems) console.log(`  - ${p}`);
+  }
+
+  if (skipped > 0) {
+    console.log(
+      `\nNote: the ${skipped} already present were left untouched — this script only adds.` +
+        `\nTo change someone's details, edit them on the roster page.`,
+    );
   }
 
   const coordinators = await db

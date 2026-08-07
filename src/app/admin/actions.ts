@@ -26,10 +26,18 @@ import {
   TripError,
   withdraw,
 } from "@/lib/trips";
+import {
+  markPaid,
+  markUnpaid,
+  setAmountPerPerson,
+  setTravelled,
+  SettleError,
+} from "@/lib/settle";
 import { db } from "@/lib/db";
 import { trips, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { PhoneError } from "@/lib/phone";
+import { JoiningYearError } from "@/lib/joining-year";
 
 /**
  * Coordinator actions.
@@ -41,7 +49,13 @@ import { PhoneError } from "@/lib/phone";
 export type ActionState = { error?: string; ok?: boolean };
 
 function toState(e: unknown): ActionState {
-  if (e instanceof MemberError || e instanceof TripError || e instanceof PhoneError) {
+  if (
+    e instanceof MemberError ||
+    e instanceof TripError ||
+    e instanceof PhoneError ||
+    e instanceof SettleError ||
+    e instanceof JoiningYearError
+  ) {
     return { error: e.message };
   }
   return { error: "Something went wrong. Please try again." };
@@ -202,6 +216,92 @@ export async function recordResponseAction(
   }
 }
 
+// --- Settling up after a trip -----------------------------------------------
+
+/**
+ * Each of these revalidates the trip's own page rather than /admin, because
+ * settling up happens after the trip has dropped off the dashboard's list of
+ * upcoming ones.
+ */
+function revalidateTrip(tripId: string) {
+  revalidatePath(`/admin/trips/${tripId}`);
+  revalidatePath("/admin/trips");
+}
+
+/** Who actually turned up — including the person nobody remembered to add. */
+export async function setTravelledAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const coordinator = await requireCoordinator();
+    const trip = await tripById(String(formData.get("tripId")));
+    await setTravelled(
+      trip,
+      String(formData.get("userId")),
+      formData.get("travelled") === "true",
+      coordinator,
+    );
+    revalidateTrip(trip.id);
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
+/** They have settled up. Also records that they travelled, if nobody had said. */
+export async function markPaidAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const coordinator = await requireCoordinator();
+    const trip = await tripById(String(formData.get("tripId")));
+    await markPaid(trip, String(formData.get("userId")), coordinator);
+    revalidateTrip(trip.id);
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
+export async function markUnpaidAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const coordinator = await requireCoordinator();
+    const trip = await tripById(String(formData.get("tripId")));
+    await markUnpaid(trip, String(formData.get("userId")), coordinator);
+    revalidateTrip(trip.id);
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
+/** What each rider is being asked for. Blank clears it. */
+export async function setAmountAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const coordinator = await requireCoordinator();
+    const trip = await tripById(String(formData.get("tripId")));
+    const raw = String(formData.get("amount") ?? "").trim();
+
+    if (raw && !/^\d+$/.test(raw)) {
+      return { error: "Enter whole rupees, digits only" };
+    }
+
+    await setAmountPerPerson(trip, raw ? Number(raw) : null, coordinator);
+    revalidateTrip(trip.id);
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
 // --- Membership -------------------------------------------------------------
 
 export async function approveMemberAction(
@@ -321,6 +421,7 @@ export async function updateMemberAction(
       memberType: formData.get("memberType") === "guest" ? "guest" : "regular",
       affiliation: String(formData.get("affiliation") ?? ""),
       email: String(formData.get("email") ?? ""),
+      joiningYear: String(formData.get("joiningYear") ?? ""),
     });
     revalidatePath("/admin/roster");
     return { ok: true };
@@ -374,6 +475,7 @@ export async function addMemberAction(
         phone: String(formData.get("phone") ?? ""),
         memberType: formData.get("memberType") === "guest" ? "guest" : "regular",
         affiliation: String(formData.get("affiliation") ?? ""),
+        joiningYear: String(formData.get("joiningYear") ?? ""),
       },
       coordinator,
     );

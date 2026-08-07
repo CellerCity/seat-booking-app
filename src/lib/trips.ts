@@ -1,6 +1,6 @@
 import "server-only";
 import { randomBytes } from "node:crypto";
-import { and, count, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, getTableColumns, sql } from "drizzle-orm";
 import { db } from "./db";
 import {
   attendance,
@@ -39,15 +39,61 @@ export async function getTripByToken(token: string): Promise<Trip | null> {
   return trip ?? null;
 }
 
-/** The trip travellers should currently be looking at. */
+/**
+ * The trip travellers should currently be looking at.
+ *
+ * The date filter is load-bearing. A trip that has been and gone keeps whatever
+ * status it had — nothing marks it finished — so without it the soonest
+ * non-settled trip is a stale one from weeks ago, and the roster page then
+ * offers to record responses against the wrong trip entirely.
+ */
 export async function getCurrentTrip(): Promise<Trip | null> {
   const [trip] = await db
     .select()
     .from(trips)
-    .where(sql`${trips.status} not in ('settled', 'cancelled')`)
-    .orderBy(trips.eventDate)
+    .where(
+      sql`${trips.status} not in ('settled', 'cancelled')
+          and ${trips.eventDate} >= current_date`,
+    )
+    .orderBy(trips.eventDate, trips.departureTime)
     .limit(1);
   return trip ?? null;
+}
+
+export type TripSummary = Trip & {
+  /** Said they were going, before the trip. */
+  booked: number;
+  /** Marked as having actually turned up. */
+  travelled: number;
+  paid: number;
+};
+
+/**
+ * Every trip, newest first — the only way to reach one that has already
+ * happened.
+ *
+ * The dashboard deliberately shows upcoming trips only; it is the screen used
+ * while phoning the contractor and a list of history on it is noise. But
+ * settling up happens *after* a trip, by which point it has dropped off that
+ * list, so it needs a door of its own.
+ */
+export async function getTripHistory(limit = 50): Promise<TripSummary[]> {
+  return db
+    .select({
+      ...getTableColumns(trips),
+      booked: sql<number>`(select count(*)::int from ${responses}
+                           where ${responses.tripId} = ${trips.id}
+                             and ${responses.going} = true)`,
+      travelled: sql<number>`(select count(*)::int from ${attendance}
+                              where ${attendance.tripId} = ${trips.id}
+                                and ${attendance.boarded} = true)`,
+      paid: sql<number>`(select count(*)::int from ${dues}
+                         where ${dues.tripId} = ${trips.id}
+                           and ${dues.status} in ('verified', 'waived'))`,
+    })
+    .from(trips)
+    .orderBy(desc(trips.eventDate), desc(trips.departureTime))
+    .limit(limit);
 }
 
 /**

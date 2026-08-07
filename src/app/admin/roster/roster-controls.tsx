@@ -159,6 +159,7 @@ export function EditMemberForm({
     email: string | null;
     memberType: "regular" | "guest";
     affiliation: string | null;
+    joiningYear: number | null;
     isCoordinator: boolean;
   };
 }) {
@@ -221,6 +222,16 @@ export function EditMemberForm({
             type="email"
             name="email"
             defaultValue={member.email ?? ""}
+            className="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900"
+          />
+        </label>
+        <label className="block text-xs">
+          <span className="text-slate-600 dark:text-slate-400">Year of joining</span>
+          <input
+            name="joiningYear"
+            inputMode="numeric"
+            defaultValue={member.joiningYear ?? ""}
+            placeholder="2024 (optional)"
             className="mt-1 w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900"
           />
         </label>
@@ -593,6 +604,12 @@ export function AddMemberForm() {
         <input
           name="affiliation"
           placeholder="Affiliation (optional)"
+          className="rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+        />
+        <input
+          name="joiningYear"
+          inputMode="numeric"
+          placeholder="Year of joining (optional)"
           className="rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
         />
       </div>

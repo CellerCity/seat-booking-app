@@ -4,6 +4,7 @@ import { db } from "./db";
 import { attendance, dues, responses, users, type User } from "./db/schema";
 import { recordUserEvent } from "./audit";
 import { normalizePhone } from "./phone";
+import { parseJoiningYear } from "./joining-year";
 
 /**
  * Membership decisions: approve, reject, block, unblock.
@@ -264,12 +265,14 @@ export async function updateMember(
     memberType?: "regular" | "guest";
     affiliation?: string;
     email?: string;
+    joiningYear?: string | number | null;
   },
 ): Promise<User> {
   const name = input.name.trim();
   if (name.length < 2) throw new MemberError("Please enter a name");
 
   const phone = normalizePhone(input.phone);
+  const joiningYear = parseJoiningYear(input.joiningYear);
   const email = input.email?.trim().toLowerCase() || null;
   if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     throw new MemberError("That email doesn't look right");
@@ -305,6 +308,7 @@ export async function updateMember(
         email,
         memberType: input.memberType ?? current.memberType,
         affiliation: input.affiliation?.trim() || null,
+        joiningYear,
         updatedAt: new Date(),
       })
       .where(eq(users.id, userId))
@@ -416,12 +420,19 @@ export async function demoteCoordinator(userId: string, coordinator: User): Prom
 
 /** Guests are interns and short-stay visitors. UG cross-over travellers are `regular`. */
 export async function addMember(
-  input: { name: string; phone: string; memberType?: "regular" | "guest"; affiliation?: string },
+  input: {
+    name: string;
+    phone: string;
+    memberType?: "regular" | "guest";
+    affiliation?: string;
+    joiningYear?: string | number | null;
+  },
   coordinator: User,
 ): Promise<User> {
   const phone = normalizePhone(input.phone);
   const name = input.name.trim();
   if (name.length < 2) throw new MemberError("Please enter a name");
+  const joiningYear = parseJoiningYear(input.joiningYear);
 
   return db.transaction(async (tx) => {
     const [existing] = await tx.select().from(users).where(eq(users.phone, phone)).limit(1);
@@ -434,6 +445,7 @@ export async function addMember(
         phone,
         memberType: input.memberType ?? "regular",
         affiliation: input.affiliation?.trim() || null,
+        joiningYear,
         // Added by a coordinator who knows them, so no approval step is needed.
         approvalStatus: "approved",
       })

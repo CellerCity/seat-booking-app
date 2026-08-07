@@ -29,6 +29,20 @@
       "when": 1785692316283,
       "tag": "0003_enable_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786080933301,
+      "tag": "0004_public_vision",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786081642837,
+      "tag": "0005_sturdy_mac_gargan",
+      "breakpoints": true
     }
   ]
 }

@@ -43,6 +43,7 @@ export default async function RosterPage() {
       role: users.role,
       memberType: users.memberType,
       affiliation: users.affiliation,
+      joiningYear: users.joiningYear,
       approvalStatus: users.approvalStatus,
       blockedReason: users.blockedReason,
       going: responses.going,
@@ -135,6 +136,9 @@ export default async function RosterPage() {
                 <div className="text-sm text-slate-500">
                   {formatPhone(p.phone)}
                   {p.affiliation && ` · ${p.affiliation}`}
+                  {/* Only when it is there. A blank slot for everyone imported
+                      from the CSV would be noise on every row. */}
+                  {p.joiningYear && ` · joined ${p.joiningYear}`}
                   {p.role === "coordinator" && p.email && ` · ${p.email}`}
                 </div>
                 {p.going && p.firstRespondedAt && (
@@ -161,6 +165,7 @@ export default async function RosterPage() {
                     email: p.email,
                     memberType: p.memberType,
                     affiliation: p.affiliation,
+                    joiningYear: p.joiningYear,
                     isCoordinator: p.role === "coordinator",
                   }}
                 />
@@ -216,6 +221,7 @@ export default async function RosterPage() {
                   <div className="text-sm text-slate-500">
                     {formatPhone(p.phone)}
                     {p.affiliation && ` · ${p.affiliation}`}
+                    {p.joiningYear && ` · joined ${p.joiningYear}`}
                   </div>
                 </div>
                 <ArchiveControl userId={p.id} name={p.name} archived />

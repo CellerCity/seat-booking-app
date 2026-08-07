@@ -110,6 +110,15 @@ export const users = pgTable(
     role: roleEnum("role").notNull().default("traveller"),
     memberType: memberTypeEnum("member_type").notNull().default("regular"),
     affiliation: text("affiliation"),
+    /**
+     * The year they joined — the batch, in practice.
+     *
+     * Optional, and shown only when it is there. A group this size accumulates
+     * repeated names across intakes, and "Priya Nair, CSE" is two different
+     * people once a few years have passed; the batch year is what a coordinator
+     * actually uses to tell them apart. Nothing keys on it.
+     */
+    joiningYear: integer("joining_year"),
     approvalStatus: approvalStatusEnum("approval_status").notNull().default("pending"),
     /** Required when blocking; kept after unblocking as part of the record. */
     blockedReason: text("blocked_reason"),
@@ -156,6 +165,19 @@ export const trips = pgTable(
 
     /** Who put this trip in the calendar. Null for the ones the cron creates. */
     createdBy: uuid("created_by").references(() => users.id),
+
+    /**
+     * Rupees each rider is being asked for, typed in by a coordinator.
+     *
+     * Optional, and deliberately not the settlement. The full model splits
+     * `cabs.actual_cost` across the riders and records the result in
+     * `settlements` (SPEC §7); until that exists, coordinators already know the
+     * figure — the contractor quotes it and they announce it in the group — so
+     * this just lets the collection list say "₹150 each, ₹900 still out"
+     * instead of an unlabelled tick box. Null means nobody recorded an amount,
+     * which is a fine state to settle up in.
+     */
+    amountPerPerson: integer("amount_per_person"),
 
     /** Pasted into WhatsApp. ≥128 bits of randomness: forwardable, not guessable. */
     linkToken: text("link_token").notNull().unique(),

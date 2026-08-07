@@ -19,6 +19,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 const {
+  addMember,
   promoteToCoordinator,
   demoteCoordinator,
   blockMember,
@@ -281,5 +282,49 @@ describe("demotion", () => {
     const traveller = await makeUser("Priya", "+919000000001");
 
     await expect(demoteCoordinator(traveller.id, boss)).rejects.toThrow(/not a coordinator/);
+  });
+});
+
+describe("year of joining", () => {
+  it("records it, and shows nothing when it was never collected", async () => {
+    const boss = await makeUser("Aman", "+919000000000", "coordinator", "approved", "a@x.com");
+
+    const withYear = await addMember(
+      { name: "Priya", phone: "9000000021", joiningYear: "2024" },
+      boss,
+    );
+    const without = await addMember({ name: "Karthik", phone: "9000000022" }, boss);
+
+    expect(withYear.joiningYear).toBe(2024);
+    expect(without.joiningYear).toBeNull();
+  });
+
+  it("fills one in later, and clears it again", async () => {
+    const member = await makeUser("Priya", "+919000000023");
+
+    const set = await updateMember(member.id, {
+      name: "Priya",
+      phone: "+919000000023",
+      joiningYear: "2023",
+    });
+    expect(set.joiningYear).toBe(2023);
+
+    const cleared = await updateMember(member.id, {
+      name: "Priya",
+      phone: "+919000000023",
+      joiningYear: "",
+    });
+    expect(cleared.joiningYear).toBeNull();
+  });
+
+  it("refuses a year that would be misleading, leaving the row unchanged", async () => {
+    const boss = await makeUser("Aman", "+919000000000", "coordinator", "approved", "a@x.com");
+
+    await expect(
+      addMember({ name: "Priya", phone: "9000000024", joiningYear: "24" }, boss),
+    ).rejects.toThrow(/four-digit/);
+
+    // Nothing half-written: the whole insert is refused before it starts.
+    expect(await getRoster()).toHaveLength(1);
   });
 });
