@@ -16,6 +16,14 @@ import {
   RecordResponseToggle,
   RoleControls,
 } from "./roster-controls";
+import {
+  NoMatches,
+  PersonRow,
+  PersonSection,
+  RosterSearch,
+  RosterSearchBox,
+  type SearchablePersonRow,
+} from "./roster-search";
 
 export const dynamic = "force-dynamic";
 
@@ -66,8 +74,29 @@ export default async function RosterPage() {
   const active = roster.filter((r) => r.approvalStatus === "approved");
   const blocked = roster.filter((r) => r.approvalStatus === "blocked");
 
+  // One search box over every list on the page, including the archived and the
+  // not-yet-approved. Searching for someone and being told they aren't here,
+  // when in fact they are three sections further down, is worse than no search.
+  const searchable: SearchablePersonRow[] = [
+    ...roster.map((p) => ({
+      id: p.id,
+      name: p.name,
+      phone: p.phone,
+      affiliation: p.affiliation,
+      joiningYear: p.joiningYear,
+    })),
+    ...pending.map((p) => ({ id: p.id, name: p.name, phone: p.phone })),
+    ...archived.map((p) => ({
+      id: p.id,
+      name: p.name,
+      phone: p.phone,
+      affiliation: p.affiliation,
+      joiningYear: p.joiningYear,
+    })),
+  ];
+
   return (
-    <div className="space-y-6">
+    <RosterSearch people={searchable} className="space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">Roster</h1>
@@ -84,8 +113,13 @@ export default async function RosterPage() {
         </div>
       </header>
 
+      <RosterSearchBox />
+
       {pending.length > 0 && (
-        <section className="rounded-xl border border-blue-300 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
+        <PersonSection
+          ids={pending.map((p) => p.id)}
+          className="rounded-xl border border-blue-300 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950"
+        >
           <h2 className="font-semibold text-blue-900 dark:text-blue-200">
             Waiting for approval ({pending.length})
           </h2>
@@ -96,8 +130,9 @@ export default async function RosterPage() {
           </p>
           <ul className="mt-3 space-y-2">
             {pending.map((p) => (
-              <li
+              <PersonRow
                 key={p.id}
+                id={p.id}
                 className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 dark:bg-slate-900"
               >
                 <div>
@@ -111,16 +146,23 @@ export default async function RosterPage() {
                   </span>
                 </div>
                 <ApprovalButtons userId={p.id} />
-              </li>
+              </PersonRow>
             ))}
           </ul>
-        </section>
+        </PersonSection>
       )}
 
-      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+      <PersonSection
+        ids={active.map((p) => p.id)}
+        className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+      >
         <ul className="divide-y divide-slate-100 dark:divide-slate-800">
           {active.map((p) => (
-            <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <PersonRow
+              key={p.id}
+              id={p.id}
+              className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
+            >
               <div className="min-w-0">
                 <span className="font-medium">{p.name}</span>
                 {p.role === "coordinator" && (
@@ -181,30 +223,40 @@ export default async function RosterPage() {
                 )}
                 <BlockControl userId={p.id} name={p.name} blocked={false} />
               </div>
-            </li>
+            </PersonRow>
           ))}
         </ul>
-      </section>
+      </PersonSection>
 
       {blocked.length > 0 && (
-        <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+        <PersonSection
+          ids={blocked.map((p) => p.id)}
+          className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
+        >
           <h2 className="font-semibold">Blocked</h2>
           <ul className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
             {blocked.map((p) => (
-              <li key={p.id} className="flex items-center justify-between gap-3 py-2">
+              <PersonRow
+                key={p.id}
+                id={p.id}
+                className="flex items-center justify-between gap-3 py-2"
+              >
                 <div>
                   <span className="font-medium">{p.name}</span>
                   <div className="text-sm text-slate-500">{p.blockedReason}</div>
                 </div>
                 <BlockControl userId={p.id} name={p.name} blocked />
-              </li>
+              </PersonRow>
             ))}
           </ul>
-        </section>
+        </PersonSection>
       )}
 
       {archived.length > 0 && (
-        <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+        <PersonSection
+          ids={archived.map((p) => p.id)}
+          className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
+        >
           <h2 className="font-semibold">Archived</h2>
           <p className="mt-1 text-sm text-slate-500">
             People who have left. Off every count and unable to book, but their past
@@ -212,8 +264,9 @@ export default async function RosterPage() {
           </p>
           <ul className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
             {archived.map((p) => (
-              <li
+              <PersonRow
                 key={p.id}
+                id={p.id}
                 className="flex flex-wrap items-center justify-between gap-3 py-2"
               >
                 <div>
@@ -225,11 +278,13 @@ export default async function RosterPage() {
                   </div>
                 </div>
                 <ArchiveControl userId={p.id} name={p.name} archived />
-              </li>
+              </PersonRow>
             ))}
           </ul>
-        </section>
+        </PersonSection>
       )}
-    </div>
+
+      <NoMatches />
+    </RosterSearch>
   );
 }

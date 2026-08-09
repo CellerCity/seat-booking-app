@@ -37,11 +37,23 @@ const {
 } = await import("./trips");
 const { users, trips, responses, responseEvents, attendance, dues } = await import("./db/schema");
 
+/**
+ * Relative, never a literal date. A trip fixture pinned to a calendar day is
+ * upcoming right up until the morning it isn't, and then everything filtering
+ * on `event_date >= current_date` fails for reasons that have nothing to do
+ * with the code under test.
+ */
+const dayAfter = (n: number) => {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
 async function makeTrip(status: "poll_open" | "draft" = "poll_open") {
   const [trip] = await testDb
     .insert(trips)
     .values({
-      eventDate: "2026-08-08",
+      eventDate: dayAfter(2),
       destination: "Event venue",
       departureTime: "07:30",
       status,
@@ -286,12 +298,6 @@ describe("the audit trail", () => {
 });
 
 describe("adding and cancelling trips", () => {
-  const dayAfter = (n: number) => {
-    const d = new Date();
-    d.setUTCDate(d.getUTCDate() + n);
-    return d.toISOString().slice(0, 10);
-  };
-
   it("adds an extra trip in the same week, open for booking straight away", async () => {
     const coordinator = await makeUser("Coord", "+919000000000", "approved", "coordinator");
     await makeTrip(); // the regular weekly run

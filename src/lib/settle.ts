@@ -357,7 +357,14 @@ export async function setAmountPerPerson(
  */
 export async function getAddableTravellers(tripId: string) {
   return db
-    .select({ id: users.id, name: users.name, phone: users.phone })
+    .select({
+      id: users.id,
+      name: users.name,
+      // Both are here to be searched on as much as displayed. A week after the
+      // trip the coordinator may only have the number the person messaged from.
+      phone: users.phone,
+      joiningYear: users.joiningYear,
+    })
     .from(users)
     .where(
       and(

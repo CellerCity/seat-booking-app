@@ -1,6 +1,8 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useDeferredValue, useMemo, useState } from "react";
+import { filterPeople } from "@/lib/people-search";
+import { formatPhone } from "@/lib/phone";
 import {
   markPaidAction,
   markUnpaidAction,
@@ -162,6 +164,12 @@ export function AmountForm({ tripId, amount }: { tripId: string; amount: number 
 /**
  * The person who came along but was never on the list.
  *
+ * Searched by name *or* number, because of how this case actually arrives: days
+ * later, from a message. The coordinator often has only the number the person
+ * paid from, and a picker that reads names alone makes them scroll fifty rows
+ * guessing which spelling was used — or give up and let the payment go
+ * unrecorded, which is the failure this whole screen exists to stop.
+ *
  * Two buttons rather than one, because "he travelled" and "he travelled and
  * paid me" are both things a coordinator remembers a week later, and making
  * them add the person first and pay second loses the second half to
@@ -172,9 +180,11 @@ export function AddTravellerForm({
   candidates,
 }: {
   tripId: string;
-  candidates: { id: string; name: string; phone: string }[];
+  candidates: { id: string; name: string; phone: string; joiningYear: number | null }[];
 }) {
+  const [query, setQuery] = useState("");
   const [userId, setUserId] = useState("");
+  const deferred = useDeferredValue(query);
   const [travelledState, addTravelled, addingTravelled] = useActionState<ActionState, FormData>(
     setTravelledAction,
     {},
@@ -183,6 +193,11 @@ export function AddTravellerForm({
     markPaidAction,
     {},
   );
+
+  const matches = useMemo(() => filterPeople(candidates, deferred), [candidates, deferred]);
+  // Looked up rather than stored, so that once the action lands and this person
+  // moves onto the list above, the selection clears itself.
+  const chosen = candidates.find((c) => c.id === userId) ?? null;
 
   const error = travelledState.error ?? paidState.error;
   const pending = addingTravelled || addingPaid;
@@ -201,28 +216,68 @@ export function AddTravellerForm({
         <span className="text-slate-600 dark:text-slate-400">
           Who came along that we missed?
         </span>
-        <select
-          value={userId}
-          onChange={(e) => setUserId(e.target.value)}
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          autoComplete="off"
+          placeholder="Search by name or number"
           className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
-        >
-          <option value="">Pick a person…</option>
-          {candidates.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+        />
       </label>
 
-      <div className="flex flex-wrap gap-2">
+      {matches.length === 0 ? (
+        <div className="rounded-md border border-dashed border-slate-300 px-3 py-4 text-center text-sm text-slate-500 dark:border-slate-700">
+          <p>
+            Nobody left to add matches <strong>{query}</strong>.
+          </p>
+          <p className="mt-1 text-xs">
+            They may already be on the list above.{" "}
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              className="underline"
+            >
+              Clear search
+            </button>
+          </p>
+        </div>
+      ) : (
+        <ul className="max-h-64 divide-y divide-slate-100 overflow-y-auto rounded-md border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+          {matches.map((c) => {
+            const picked = c.id === userId;
+            return (
+              <li key={c.id}>
+                <button
+                  type="button"
+                  aria-pressed={picked}
+                  onClick={() => setUserId(picked ? "" : c.id)}
+                  className={`flex w-full items-baseline justify-between gap-3 px-3 py-2 text-left text-sm ${
+                    picked
+                      ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
+                      : "hover:bg-slate-50 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  <span className="font-medium">{c.name}</span>
+                  <span className={`text-xs ${picked ? "" : "text-slate-500"}`}>
+                    {formatPhone(c.phone)}
+                    {c.joiningYear && ` · ${c.joiningYear}`}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
         <form action={addTravelled}>
           <input type="hidden" name="tripId" value={tripId} />
-          <input type="hidden" name="userId" value={userId} />
+          <input type="hidden" name="userId" value={chosen?.id ?? ""} />
           <input type="hidden" name="travelled" value="true" />
           <button
             type="submit"
-            disabled={!userId || pending}
+            disabled={!chosen || pending}
             className="rounded-md border border-slate-300 px-3 py-2 text-sm disabled:opacity-40 dark:border-slate-700"
           >
             {addingTravelled ? "Adding…" : "They travelled"}
@@ -230,15 +285,27 @@ export function AddTravellerForm({
         </form>
         <form action={addPaid}>
           <input type="hidden" name="tripId" value={tripId} />
-          <input type="hidden" name="userId" value={userId} />
+          <input type="hidden" name="userId" value={chosen?.id ?? ""} />
           <button
             type="submit"
-            disabled={!userId || pending}
+            disabled={!chosen || pending}
             className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
           >
             {addingPaid ? "Adding…" : "They travelled and paid"}
           </button>
         </form>
+        {/* Named, not just highlighted. These two buttons put money on the
+            record, and the row that is selected can be scrolled out of sight. */}
+        <span className="text-sm text-slate-500">
+          {chosen ? (
+            <>
+              for <strong className="text-slate-900 dark:text-slate-100">{chosen.name}</strong>{" "}
+              · {formatPhone(chosen.phone)}
+            </>
+          ) : (
+            "Pick someone above first"
+          )}
+        </span>
       </div>
 
       <p className="text-xs text-slate-500">
