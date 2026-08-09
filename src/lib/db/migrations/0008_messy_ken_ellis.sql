@@ -1,0 +1,1 @@
+ALTER TABLE "responses" ADD COLUMN "guests" integer DEFAULT 0 NOT NULL;

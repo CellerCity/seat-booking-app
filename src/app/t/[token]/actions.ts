@@ -8,7 +8,13 @@ import {
   signOutTraveller,
 } from "@/lib/auth/traveller";
 import { PhoneError } from "@/lib/phone";
-import { bookSeat, getTripByToken, TripError, withdraw } from "@/lib/trips";
+import {
+  bookSeat,
+  getTripByToken,
+  setBookingGuests,
+  TripError,
+  withdraw,
+} from "@/lib/trips";
 
 /**
  * Traveller actions. Three things only: book, withdraw, pay.
@@ -76,6 +82,31 @@ export async function bookAction(
 
   try {
     await bookSeat(trip, user, { source: "self" });
+    revalidatePath(`/t/${token}`);
+    return {};
+  } catch (e) {
+    if (e instanceof TripError) return { error: e.message };
+    return { error: "Something went wrong. Please try again." };
+  }
+}
+
+/** Seats for friends coming along, alongside their own. */
+export async function setGuestsAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const token = String(formData.get("token") ?? "");
+  const raw = String(formData.get("guests") ?? "").trim();
+
+  const user = await getCurrentTraveller();
+  if (!user) return { error: "Please enter your phone number first." };
+
+  const trip = await getTripByToken(token);
+  if (!trip) return { error: "This trip link is no longer valid." };
+  if (!/^\d+$/.test(raw)) return { error: "Enter a whole number of friends." };
+
+  try {
+    await setBookingGuests(trip, user, Number(raw), { source: "self" });
     revalidatePath(`/t/${token}`);
     return {};
   } catch (e) {

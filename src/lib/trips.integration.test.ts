@@ -32,6 +32,7 @@ const {
   getHeadcount,
   getUpcomingTrips,
   lockTrip,
+  setBookingGuests,
   withdraw,
   generateLinkToken,
 } = await import("./trips");
@@ -151,6 +152,88 @@ describe("the weekly cycle", () => {
     const trip = await makeTrip();
     const blocked = await makeUser("Blocked", "+919000000008", "blocked");
     await expect(bookSeat(trip, blocked)).rejects.toThrow(/Access removed/);
+  });
+});
+
+describe("booking for friends", () => {
+  it("counts their seats in the number read to the contractor", async () => {
+    const trip = await makeTrip();
+    const booker = await makeUser("Asha", "+919000000001");
+    await bookSeat(trip, booker);
+
+    await setBookingGuests(trip, booker, 2);
+
+    // Three seats are needed, not one. This is the whole number the app exists
+    // to get right, and friends booked for were simply vanishing from it.
+    expect((await getHeadcount(trip)).confirmed).toBe(3);
+  });
+
+  it("locks the seat count, not the head count", async () => {
+    const trip = await makeTrip();
+    const coordinator = await makeUser("Coord", "+919000000000", "approved", "coordinator");
+    const booker = await makeUser("Asha", "+919000000001");
+    await bookSeat(trip, booker);
+    await setBookingGuests(trip, booker, 2);
+
+    expect((await lockTrip(trip, coordinator)).lockedCount).toBe(3);
+  });
+
+  it("takes their friends' seats with them when they withdraw", async () => {
+    const trip = await makeTrip();
+    const booker = await makeUser("Asha", "+919000000001");
+    await bookSeat(trip, booker);
+    await setBookingGuests(trip, booker, 2);
+
+    await withdraw(trip, booker);
+
+    expect((await getHeadcount(trip)).confirmed).toBe(0);
+    const [row] = await testDb
+      .select()
+      .from(responses)
+      .where(eq(responses.userId, booker.id));
+    expect(row.guests).toBe(0);
+  });
+
+  it("keeps a pending person's friends out of the count too", async () => {
+    const trip = await makeTrip();
+    const stranger = await makeUser("New", "+919000000009", "pending");
+    await bookSeat(trip, stranger);
+    await setBookingGuests(trip, stranger, 2);
+
+    const count = await getHeadcount(trip);
+    expect(count.confirmed).toBe(0);
+    expect(count.awaitingApproval).toBe(3);
+  });
+
+  it("counts a late booker's friends as late too", async () => {
+    const trip = await makeTrip();
+    const coordinator = await makeUser("Coord", "+919000000000", "approved", "coordinator");
+    const locked = await lockTrip(trip, coordinator);
+    const latecomer = await makeUser("Late", "+919000000002");
+
+    await bookSeat(locked, latecomer);
+    await setBookingGuests(locked, latecomer, 1);
+
+    const count = await getHeadcount(locked);
+    expect(count.confirmed).toBe(0);
+    // Accepting them means finding room for two, which is the decision.
+    expect(count.awaitingLateDecision).toBe(2);
+  });
+
+  it("will not book seats for someone who is not going themselves", async () => {
+    const trip = await makeTrip();
+    const absent = await makeUser("Asha", "+919000000001");
+
+    await expect(setBookingGuests(trip, absent, 2)).rejects.toThrow(/own seat first/);
+  });
+
+  it("refuses a minibus, which is a typo rather than a booking", async () => {
+    const trip = await makeTrip();
+    const booker = await makeUser("Asha", "+919000000001");
+    await bookSeat(trip, booker);
+
+    await expect(setBookingGuests(trip, booker, 50)).rejects.toThrow(/more than/);
+    await expect(setBookingGuests(trip, booker, -1)).rejects.toThrow(/whole number/);
   });
 });
 

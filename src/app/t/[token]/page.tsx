@@ -86,6 +86,7 @@ export default async function TripPage({
           <BookingControls
             token={token}
             going={response?.going ?? false}
+            guests={response?.guests ?? 0}
             locked={locked}
             held={isPending(user)}
             deadlineLabel={deadlineLabel}

@@ -237,6 +237,9 @@ export default async function DashboardPage({
                 <span>
                   <PersonName name={b.name} joiningYear={b.joiningYear} />{" "}
                   <span className="text-sm text-slate-500">
+                    {/* Seats, not people — accepting them means finding room for
+                        all of them, and that is the decision being made here. */}
+                    {b.guests > 0 && `+ ${b.guests} · `}
                     booked {formatClockTime(b.firstRespondedAt)}
                   </span>
                 </span>
@@ -336,6 +339,7 @@ async function getLateBookings(tripId: string, lockedAt: Date) {
       userId: users.id,
       name: users.name,
       joiningYear: users.joiningYear,
+      guests: responses.guests,
       firstRespondedAt: responses.firstRespondedAt,
     })
     .from(responses)

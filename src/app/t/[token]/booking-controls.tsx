@@ -1,11 +1,18 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { bookAction, withdrawAction, type ActionState } from "./actions";
+import {
+  bookAction,
+  setGuestsAction,
+  withdrawAction,
+  type ActionState,
+} from "./actions";
 
 type Props = {
   token: string;
   going: boolean;
+  /** Seats they have booked for friends who won't tap the link themselves. */
+  guests: number;
   locked: boolean;
   held: boolean;
   /**
@@ -26,7 +33,7 @@ type Props = {
  * already hired, so the group pays for a seat nobody sits in — the traveller
  * should be told that plainly, once, and then trusted to decide.
  */
-export function BookingControls({ token, going, locked, held, deadlineLabel }: Props) {
+export function BookingControls({ token, going, guests, locked, held, deadlineLabel }: Props) {
   const [confirming, setConfirming] = useState(false);
 
   const [bookState, runBook, booking] = useActionState<ActionState, FormData>(bookAction, {});
@@ -67,7 +74,7 @@ export function BookingControls({ token, going, locked, held, deadlineLabel }: P
     <div className="space-y-3">
       <div className="rounded-xl bg-emerald-50 px-4 py-4 text-center dark:bg-emerald-950">
         <p className="text-lg font-semibold text-emerald-900 dark:text-emerald-100">
-          You&apos;re going
+          {guests > 0 ? `You + ${guests} going` : "You're going"}
         </p>
         {held && (
           <p className="mt-1 text-sm text-emerald-800 dark:text-emerald-300">
@@ -75,6 +82,8 @@ export function BookingControls({ token, going, locked, held, deadlineLabel }: P
           </p>
         )}
       </div>
+
+      <GuestsField token={token} guests={guests} />
 
       {!confirming ? (
         <button
@@ -116,6 +125,63 @@ export function BookingControls({ token, going, locked, held, deadlineLabel }: P
       )}
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * Seats for friends coming along.
+ *
+ * Plus and minus rather than a text field: this is a thumb on a phone, and the
+ * only numbers anyone needs are the first few. It asks for a count and not for
+ * names because at poll time the count is the whole job — the number goes down
+ * the phone to the contractor, and who owes what is settled after the trip.
+ */
+function GuestsField({ token, guests }: { token: string; guests: number }) {
+  const [state, run, pending] = useActionState<ActionState, FormData>(setGuestsAction, {});
+
+  const step = (next: number) => {
+    const data = new FormData();
+    data.set("token", token);
+    data.set("guests", String(next));
+    run(data);
+  };
+
+  return (
+    <div className="rounded-xl border border-slate-200 px-4 py-3 dark:border-slate-800">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">Booking for friends?</p>
+          <p className="text-xs text-slate-500">
+            Add a seat for anyone coming with you who won&apos;t tap this
+            themselves.
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => step(guests - 1)}
+            disabled={pending || guests === 0}
+            aria-label="One fewer friend"
+            className="size-9 rounded-lg border border-slate-300 text-lg disabled:opacity-30 dark:border-slate-700"
+          >
+            −
+          </button>
+          <span className="w-6 text-center text-lg font-semibold tabular-nums">{guests}</span>
+          <button
+            type="button"
+            onClick={() => step(guests + 1)}
+            disabled={pending}
+            aria-label="One more friend"
+            className="size-9 rounded-lg border border-slate-300 text-lg disabled:opacity-30 dark:border-slate-700"
+          >
+            +
+          </button>
+        </div>
+      </div>
+      {state.error && (
+        <p className="mt-2 text-sm text-red-600 dark:text-red-400">{state.error}</p>
+      )}
     </div>
   );
 }

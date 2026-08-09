@@ -56,6 +56,7 @@ export default async function RosterPage() {
       approvalStatus: users.approvalStatus,
       blockedReason: users.blockedReason,
       going: responses.going,
+      guests: responses.guests,
       firstRespondedAt: responses.firstRespondedAt,
       source: responses.source,
     })
@@ -185,7 +186,9 @@ export default async function RosterPage() {
                 </div>
                 {p.going && p.firstRespondedAt && (
                   <div className="text-xs text-emerald-700 dark:text-emerald-400">
-                    going · responded {formatClockTime(p.firstRespondedAt)}
+                    going
+                    {p.guests ? ` + ${p.guests}` : ""} · responded{" "}
+                    {formatClockTime(p.firstRespondedAt)}
                     {p.source === "coordinator" && " (entered by coordinator)"}
                   </div>
                 )}
@@ -197,6 +200,7 @@ export default async function RosterPage() {
                     tripId={trip.id}
                     userId={p.id}
                     going={p.going ?? false}
+                    guests={p.guests ?? 0}
                   />
                 )}
                 <EditMemberForm

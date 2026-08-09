@@ -23,6 +23,7 @@ import {
   decideLateBooking,
   deleteTrip,
   lockTrip,
+  setBookingGuests,
   TripError,
   withdraw,
 } from "@/lib/trips";
@@ -216,6 +217,33 @@ export async function recordResponseAction(
     }
 
     revalidatePath("/admin");
+    revalidatePath("/admin/roster");
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
+/** Seats a coordinator is recording for friends coming with someone. */
+export async function recordGuestsAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const coordinator = await requireCoordinator();
+    const trip = await tripById(String(formData.get("tripId")));
+    const user = await userById(String(formData.get("userId")));
+    const raw = String(formData.get("guests") ?? "").trim();
+
+    if (!/^\d+$/.test(raw)) return { error: "Enter a whole number of friends" };
+
+    await setBookingGuests(trip, user, Number(raw), {
+      source: "coordinator",
+      actorId: coordinator.id,
+    });
+
+    revalidatePath("/admin");
+    revalidatePath("/admin/roster");
     return { ok: true };
   } catch (e) {
     return toState(e);

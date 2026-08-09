@@ -127,7 +127,10 @@ export async function getResponse(tripId: string, userId: string) {
 }
 
 export type HeadcountBreakdown = {
-  /** The number read to the contractor: approved people, booked in time or accepted late. */
+  /**
+   * The number read to the contractor: seats for approved people who booked in
+   * time or were accepted late, plus the friends they booked for.
+   */
   confirmed: number;
   /** Booked after lock, awaiting a coordinator's accept/decline. */
   awaitingLateDecision: number;
@@ -152,6 +155,7 @@ export async function getHeadcount(trip: Trip): Promise<HeadcountBreakdown> {
   const rows = await db
     .select({
       going: responses.going,
+      guests: responses.guests,
       approvalStatus: users.approvalStatus,
       lateApproved: responses.lateApproved,
       firstRespondedAt: responses.firstRespondedAt,
@@ -173,20 +177,25 @@ export async function getHeadcount(trip: Trip): Promise<HeadcountBreakdown> {
   for (const r of rows) {
     if (!r.isActive || r.approvalStatus === "blocked" || r.approvalStatus === "rejected") continue;
 
+    // Seats, not people. Someone booking for two friends needs three seats in
+    // the cab, and every one of these figures is about seats — this is the
+    // number read down the phone.
+    const seats = 1 + r.guests;
+
     if (!r.going) {
       // A withdrawal only hurts if the cabs were already hired against it.
-      if (locked && r.updatedAt > locked) count.withdrewAfterLock++;
+      if (locked && r.updatedAt > locked) count.withdrewAfterLock += seats;
       continue;
     }
 
     if (r.approvalStatus === "pending") {
-      count.awaitingApproval++;
+      count.awaitingApproval += seats;
       continue;
     }
 
     const isLate = locked !== null && r.firstRespondedAt > locked;
-    if (isLate && !r.lateApproved) count.awaitingLateDecision++;
-    else count.confirmed++;
+    if (isLate && !r.lateApproved) count.awaitingLateDecision += seats;
+    else count.confirmed += seats;
   }
 
   return count;
@@ -284,6 +293,67 @@ export async function bookSeat(
   return { booked: true, isLate, isHeld };
 }
 
+/** Nobody brings a minibus. A stray digit here goes straight to the contractor. */
+export const MAX_BOOKING_GUESTS = 6;
+
+/**
+ * Seats this person is booking for friends, alongside their own.
+ *
+ * One person answering for the two mates next to them is how half this group
+ * already uses the WhatsApp poll, and those seats were simply vanishing from
+ * the count. They are not named here on purpose: at poll time the only thing
+ * that matters is how many seats the contractor is asked for. Who actually rode
+ * and who owes for it is settled after the trip, where names can be attached
+ * and the friends who turn out to be on the roster get their own rows.
+ *
+ * Booking for others is only possible while you are going yourself — a seat
+ * booked by someone who is not coming has nobody attached to it at all.
+ */
+export async function setBookingGuests(
+  trip: Trip,
+  user: User,
+  guests: number,
+  opts: { source: "self" | "coordinator"; actorId?: string } = { source: "self" },
+): Promise<void> {
+  assertPollUsable(trip);
+  if (user.approvalStatus === "blocked") throw new TripError("Access removed");
+  if (!Number.isInteger(guests) || guests < 0) {
+    throw new TripError("Enter a whole number of friends");
+  }
+  if (guests > MAX_BOOKING_GUESTS) {
+    throw new TripError(`That is more than ${MAX_BOOKING_GUESTS} — ask a coordinator`);
+  }
+
+  await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(responses)
+      .where(and(eq(responses.tripId, trip.id), eq(responses.userId, user.id)))
+      .limit(1);
+
+    if (!existing?.going) throw new TripError("Book your own seat first");
+
+    await tx
+      .update(responses)
+      .set({ guests, updatedAt: new Date() })
+      .where(eq(responses.id, existing.id));
+
+    // Not a `book` event: the person's own answer has not changed, and folding
+    // this into the booking feed would read as though they booked twice.
+    if (existing.guests !== guests) {
+      await recordResponseEvent(tx, {
+        tripId: trip.id,
+        userId: user.id,
+        action: "book",
+        fromValue: `going+${existing.guests}`,
+        toValue: `going+${guests}`,
+        source: opts.source,
+        actorId: opts.actorId ?? null,
+      });
+    }
+  });
+}
+
 export async function withdraw(
   trip: Trip,
   user: User,
@@ -305,7 +375,10 @@ export async function withdraw(
 
     await tx
       .update(responses)
-      .set({ going: false, lateApproved: false, updatedAt: new Date() })
+      // Their friends' seats go with them. Someone who drops out is not still
+      // bringing two people, and leaving the seats behind quietly inflates the
+      // number the cabs are hired against.
+      .set({ going: false, guests: 0, lateApproved: false, updatedAt: new Date() })
       .where(eq(responses.id, existing.id));
 
     await recordResponseEvent(tx, {

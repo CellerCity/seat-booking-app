@@ -11,6 +11,7 @@ import {
   demoteMemberAction,
   restoreMemberAction,
   promoteMemberAction,
+  recordGuestsAction,
   recordResponseAction,
   rejectMemberAction,
   unblockMemberAction,
@@ -532,39 +533,89 @@ export function BlockControl({
   );
 }
 
-/** For the holdout who replies "count me in" in the group instead of tapping. */
+/**
+ * For the holdout who replies "count me in" in the group instead of tapping —
+ * and, just as often, "count me and two others in".
+ */
 export function RecordResponseToggle({
   tripId,
   userId,
   going,
+  guests,
 }: {
   tripId: string;
   userId: string;
   going: boolean;
+  guests: number;
 }) {
   const [state, run, pending] = useActionState<ActionState, FormData>(
     recordResponseAction,
     {},
   );
+  const [guestState, runGuests, savingGuests] = useActionState<ActionState, FormData>(
+    recordGuestsAction,
+    {},
+  );
+
+  const step = (next: number) => {
+    const data = new FormData();
+    data.set("tripId", tripId);
+    data.set("userId", userId);
+    data.set("guests", String(next));
+    runGuests(data);
+  };
 
   return (
-    <form action={run}>
-      <input type="hidden" name="tripId" value={tripId} />
-      <input type="hidden" name="userId" value={userId} />
-      <input type="hidden" name="going" value={going ? "false" : "true"} />
-      <button
-        type="submit"
-        disabled={pending}
-        className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
-          going
-            ? "border border-slate-300 dark:border-slate-700"
-            : "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
-        }`}
-      >
-        {pending ? "…" : going ? "Remove" : "Mark going"}
-      </button>
-      {state.error && <p className="text-xs text-red-600">{state.error}</p>}
-    </form>
+    <div className="flex items-center gap-2">
+      <form action={run}>
+        <input type="hidden" name="tripId" value={tripId} />
+        <input type="hidden" name="userId" value={userId} />
+        <input type="hidden" name="going" value={going ? "false" : "true"} />
+        <button
+          type="submit"
+          disabled={pending}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+            going
+              ? "border border-slate-300 dark:border-slate-700"
+              : "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
+          }`}
+        >
+          {pending ? "…" : going ? "Remove" : "Mark going"}
+        </button>
+      </form>
+
+      {/* Only once they are going. A seat booked for a friend of someone who
+          isn't coming has nobody attached to it. */}
+      {going && (
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => step(guests - 1)}
+            disabled={savingGuests || guests === 0}
+            aria-label="One fewer friend"
+            className="size-6 rounded border border-slate-300 text-xs disabled:opacity-30 dark:border-slate-700"
+          >
+            −
+          </button>
+          <span className="w-8 text-center text-xs tabular-nums text-slate-500">
+            +{guests}
+          </span>
+          <button
+            type="button"
+            onClick={() => step(guests + 1)}
+            disabled={savingGuests}
+            aria-label="One more friend"
+            className="size-6 rounded border border-slate-300 text-xs disabled:opacity-30 dark:border-slate-700"
+          >
+            +
+          </button>
+        </div>
+      )}
+
+      {(state.error ?? guestState.error) && (
+        <p className="text-xs text-red-600">{state.error ?? guestState.error}</p>
+      )}
+    </div>
   );
 }
 

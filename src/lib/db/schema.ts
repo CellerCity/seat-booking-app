@@ -211,6 +211,16 @@ export const responses = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     going: boolean("going").notNull(),
+    /**
+     * Seats booked for friends alongside their own.
+     *
+     * Booking for someone else is how a good half of this group already uses the
+     * WhatsApp poll — one person answers for the two mates sitting next to them.
+     * Without somewhere to put it those seats simply went missing from the
+     * count, which is the one number the whole app exists to get right, so they
+     * are counted here and folded into whichever bucket the booker lands in.
+     */
+    guests: integer("guests").notNull().default(0),
     /** Set once on first response and never overwritten — late detection reads
      *  this, so a later edit must not launder a late booking into an early one. */
     firstRespondedAt: timestamp("first_responded_at", { withTimezone: true })
