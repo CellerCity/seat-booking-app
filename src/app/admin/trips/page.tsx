@@ -3,6 +3,7 @@ import { requireCoordinatorPage } from "@/lib/auth/coordinator";
 import { getTripHistory } from "@/lib/trips";
 import { formatRupees } from "@/lib/cost";
 import { formatTime, formatTripDate } from "@/lib/format";
+import { DeleteTripControl } from "./trip-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -46,10 +47,16 @@ export default async function TripHistoryPage() {
             const owing = t.travelled - t.paid;
 
             return (
-              <li key={t.id}>
+              <li
+                key={t.id}
+                className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+              >
+                {/* The delete control is a sibling of the link, not inside it —
+                    a button nested in an anchor is not a thing a browser can be
+                    trusted to resolve. */}
                 <Link
                   href={`/admin/trips/${t.id}`}
-                  className="block rounded-xl border border-slate-200 bg-white p-4 hover:border-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-600"
+                  className="block rounded-t-xl p-4 hover:bg-slate-50 dark:hover:bg-slate-800"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
@@ -92,6 +99,17 @@ export default async function TripHistoryPage() {
                     </div>
                   </div>
                 </Link>
+
+                <div className="flex flex-wrap items-center justify-end gap-2 px-4 pb-3">
+                  <DeleteTripControl
+                    tripId={t.id}
+                    label={formatTripDate(t.eventDate)}
+                    booked={t.booked}
+                    travelled={t.travelled}
+                    paid={t.paid}
+                    amountPerPerson={t.amountPerPerson}
+                  />
+                </div>
               </li>
             );
           })}

@@ -1,13 +1,17 @@
 "use client";
 
 import { useActionState, useDeferredValue, useMemo, useState } from "react";
+import { formatRupees } from "@/lib/cost";
 import { filterPeople } from "@/lib/people-search";
 import { formatPhone } from "@/lib/phone";
 import { PersonName } from "../../person-name";
 import {
   markPaidAction,
   markUnpaidAction,
+  recordGroupPaymentAction,
+  removeFromTripAction,
   setAmountAction,
+  setGuestsAction,
   setTravelledAction,
   type ActionState,
 } from "../../actions";
@@ -60,6 +64,160 @@ export function PaidToggle({
 }
 
 /**
+ * One payment covering a group.
+ *
+ * Opened from the payer's own row, because that is how the information arrives:
+ * "Rahul sent ₹450 for himself and two others". Named friends are ticked from
+ * the list and each gets their own settled row stamped with who paid; the ones
+ * nobody can name become a count. Naming is put first and the unnamed count
+ * last, deliberately — a named person has a ledger and can be credited next
+ * week, and a count cannot.
+ */
+export function PaidForOthersForm({
+  tripId,
+  payer,
+  others,
+  amountPerPerson,
+  guests,
+}: {
+  tripId: string;
+  payer: { id: string; name: string; joiningYear: number | null };
+  others: { id: string; name: string; phone: string; joiningYear: number | null; paid: boolean }[];
+  amountPerPerson: number | null;
+  guests: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [covers, setCovers] = useState<string[]>([]);
+  const [extra, setExtra] = useState(guests);
+  const deferred = useDeferredValue(query);
+  const [state, run, pending] = useActionState<ActionState, FormData>(
+    recordGroupPaymentAction,
+    {},
+  );
+
+  // `others` is the whole trip plus the rest of the roster, shared by every row
+  // — the payer drops out here rather than in fifty separate copies.
+  const matches = useMemo(
+    () => filterPeople(others, deferred).filter((o) => o.id !== payer.id),
+    [others, deferred, payer.id],
+  );
+  const riders = 1 + covers.length + extra;
+  const total = amountPerPerson === null ? null : amountPerPerson * riders;
+
+  if (state.ok && open) setOpen(false);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-xs text-slate-500 underline"
+      >
+        Paid for others…
+      </button>
+    );
+  }
+
+  return (
+    <form
+      action={run}
+      className="w-full space-y-3 rounded-lg border border-slate-300 p-3 dark:border-slate-700"
+    >
+      <input type="hidden" name="tripId" value={tripId} />
+      <input type="hidden" name="payerId" value={payer.id} />
+
+      <p className="text-sm">
+        <PersonName name={payer.name} joiningYear={payer.joiningYear} className="font-semibold" />{" "}
+        paid for themselves and:
+      </p>
+
+      <input
+        type="search"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        autoComplete="off"
+        placeholder="Search by name or number"
+        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+      />
+
+      <ul className="max-h-56 space-y-1 overflow-y-auto">
+        {matches.length === 0 && (
+          <li className="px-1 py-2 text-xs text-slate-500">Nobody else matches that.</li>
+        )}
+        {matches.map((o) => (
+          <li key={o.id}>
+            <label className="flex items-center gap-2 rounded px-1 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">
+              <input
+                type="checkbox"
+                name="covers"
+                value={o.id}
+                checked={covers.includes(o.id)}
+                onChange={(e) =>
+                  setCovers((c) =>
+                    e.target.checked ? [...c, o.id] : c.filter((id) => id !== o.id),
+                  )
+                }
+                className="size-4"
+              />
+              <PersonName name={o.name} joiningYear={o.joiningYear} />
+              <span className="ml-auto text-xs text-slate-500">
+                {o.paid ? "already paid" : formatPhone(o.phone)}
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+
+      {/* Ticked people who are filtered out of view still post, because the
+          checkbox inputs are what submit — but a coordinator cannot see them,
+          so the count says so. */}
+      {covers.length > 0 && (
+        <p className="text-xs text-slate-500">{covers.length} ticked</p>
+      )}
+
+      <label className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-slate-600 dark:text-slate-400">…and friends we can&apos;t name</span>
+        <input
+          name="guests"
+          inputMode="numeric"
+          value={extra}
+          onChange={(e) => setExtra(Number(e.target.value.replace(/\D/g, "")) || 0)}
+          className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900"
+        />
+      </label>
+      <p className="text-xs text-slate-500">
+        Better to add them to the roster and tick them above — a named person can
+        be chased or credited later. Use this only when nobody can remember.
+      </p>
+
+      <p className="text-sm font-medium">
+        {riders} {riders === 1 ? "rider" : "riders"}
+        {total !== null && ` · ${formatRupees(total)}`}
+      </p>
+
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {pending ? "Recording…" : "Record payment"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700"
+        >
+          Cancel
+        </button>
+      </div>
+      {state.error && <p className="text-xs text-red-600">{state.error}</p>}
+    </form>
+  );
+}
+
+/**
  * Whether they actually turned up.
  *
  * Three states, not two: "nobody has said" is different from "did not travel",
@@ -103,6 +261,162 @@ export function TravelledControl({
       })}
       {state.error && <span className="text-xs text-red-600">{state.error}</span>}
     </div>
+  );
+}
+
+/**
+ * Take someone off this trip who should never have been added.
+ *
+ * Separate from "Didn't travel", which is a real decision about a real person
+ * and rightly leaves them on the list. This is the wrong tap — two people share
+ * a name, the list is fifty long, and the entry is simply wrong.
+ *
+ * It confirms rather than refuses, and the confirmation names what goes,
+ * including any payment recorded. Being told to undo the payment first, on the
+ * screen where the payment was the mistake, is the dead end this replaces.
+ */
+export function RemoveFromTripControl({
+  tripId,
+  userId,
+  name,
+  joiningYear,
+  paid,
+  amount,
+}: {
+  tripId: string;
+  userId: string;
+  name: string;
+  joiningYear: number | null;
+  paid: boolean;
+  amount: number | null;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [state, run, pending] = useActionState<ActionState, FormData>(removeFromTripAction, {});
+
+  if (!confirming) {
+    return (
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="text-xs text-slate-400 underline"
+        >
+          Remove
+        </button>
+        {state.error && <span className="text-xs text-red-600">{state.error}</span>}
+      </div>
+    );
+  }
+
+  return (
+    <form
+      action={run}
+      className="w-full space-y-2 rounded-lg border border-red-300 p-3 dark:border-red-900"
+    >
+      <input type="hidden" name="tripId" value={tripId} />
+      <input type="hidden" name="userId" value={userId} />
+      <p className="text-xs">
+        Take <PersonName name={name} joiningYear={joiningYear} className="font-semibold" /> off
+        this trip?
+        {paid && (
+          <>
+            {" "}
+            <span className="text-red-700 dark:text-red-400">
+              The {formatRupees(amount ?? 0)} recorded against them is erased with it.
+            </span>
+          </>
+        )}{" "}
+        They stay on the roster, and their other trips are untouched. If they booked
+        this one, the booking stands.
+      </p>
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-md bg-red-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+        >
+          {pending ? "Removing…" : "Remove"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirming(false)}
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-xs dark:border-slate-700"
+        >
+          Never mind
+        </button>
+      </div>
+      {state.error && <p className="text-xs text-red-600">{state.error}</p>}
+    </form>
+  );
+}
+
+/**
+ * Unnamed friends who rode with this person, without a payment attached.
+ *
+ * The travel half of the same problem: three people got in the cab, one of them
+ * is on the roster and nobody caught the other two names. Recording the count
+ * keeps the rider total honest even while the money is still outstanding.
+ */
+export function GuestsControl({
+  tripId,
+  userId,
+  guests,
+}: {
+  tripId: string;
+  userId: string;
+  guests: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [state, run, pending] = useActionState<ActionState, FormData>(setGuestsAction, {});
+
+  if (state.ok && open) setOpen(false);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={`rounded-md px-2 py-1 text-xs ${
+          guests > 0
+            ? "bg-slate-200 font-medium dark:bg-slate-700"
+            : "border border-slate-300 text-slate-500 dark:border-slate-700"
+        }`}
+      >
+        {guests > 0 ? `+${guests}` : "+ friend"}
+      </button>
+    );
+  }
+
+  return (
+    <form action={run} className="flex items-center gap-1.5">
+      <input type="hidden" name="tripId" value={tripId} />
+      <input type="hidden" name="userId" value={userId} />
+      <label className="text-xs text-slate-600 dark:text-slate-400">
+        Came with
+        <input
+          name="guests"
+          inputMode="numeric"
+          defaultValue={guests}
+          autoFocus
+          className="ml-1.5 w-14 rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+        />
+      </label>
+      <button
+        type="submit"
+        disabled={pending}
+        className="rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
+      >
+        {pending ? "…" : "Save"}
+      </button>
+      <button
+        type="button"
+        onClick={() => setOpen(false)}
+        className="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700"
+      >
+        Cancel
+      </button>
+      {state.error && <span className="text-xs text-red-600">{state.error}</span>}
+    </form>
   );
 }
 

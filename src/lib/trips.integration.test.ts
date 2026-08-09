@@ -407,6 +407,37 @@ describe("adding and cancelling trips", () => {
     expect(await testDb.select().from(trips).where(eq(trips.id, trip.id))).toHaveLength(1);
   });
 
+  it("deletes records and all when a coordinator has confirmed exactly that", async () => {
+    // The other path is a safety catch on a quick tap. This one is a coordinator
+    // who has been shown the riders and the rupees and said yes to those, and
+    // refusing there would leave a bad trip on the books permanently.
+    const coordinator = await makeUser("Coord", "+919000000000", "approved", "coordinator");
+    const trip = await makeTrip();
+    const rider = await makeUser("Rider", "+919000000027");
+    await testDb
+      .insert(attendance)
+      .values({ tripId: trip.id, userId: rider.id, boarded: true, markedBy: coordinator.id });
+    await testDb.insert(dues).values({ tripId: trip.id, userId: rider.id, amount: 150 });
+
+    await deleteTrip(trip, { withRecords: true });
+
+    expect(await testDb.select().from(trips).where(eq(trips.id, trip.id))).toHaveLength(0);
+    expect(await testDb.select().from(dues).where(eq(dues.tripId, trip.id))).toHaveLength(0);
+    expect(
+      await testDb.select().from(attendance).where(eq(attendance.tripId, trip.id)),
+    ).toHaveLength(0);
+    // The people are not part of what was deleted.
+    expect(await testDb.select().from(users).where(eq(users.id, rider.id))).toHaveLength(1);
+  });
+
+  it("still keeps a settled trip, confirmed or not", async () => {
+    const trip = await makeTrip();
+    await testDb.update(trips).set({ status: "settled" }).where(eq(trips.id, trip.id));
+    const [settled] = await testDb.select().from(trips).where(eq(trips.id, trip.id));
+
+    await expect(deleteTrip(settled, { withRecords: true })).rejects.toThrow(/settled/i);
+  });
+
   it("will not cancel the same trip twice", async () => {
     const coordinator = await makeUser("Coord", "+919000000000", "approved", "coordinator");
     const trip = await makeTrip();

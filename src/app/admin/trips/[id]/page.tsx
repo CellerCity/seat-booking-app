@@ -10,7 +10,10 @@ import { PersonName } from "../../person-name";
 import {
   AddTravellerForm,
   AmountForm,
+  GuestsControl,
+  PaidForOthersForm,
   PaidToggle,
+  RemoveFromTripControl,
   TravelledControl,
 } from "./settle-controls";
 
@@ -42,6 +45,21 @@ export default async function TripSettlePage({
 
   const totals = totalsFor(ledger, trip.amountPerPerson);
   const cancelled = trip.status === "cancelled";
+
+  // Anyone a payment could cover: the people already on this trip, plus the rest
+  // of the roster — the friend someone paid for is often precisely the person
+  // nobody had added yet. Built once and handed to every row by the same
+  // reference, rather than a filtered copy per person.
+  const payable = [
+    ...ledger.map((r) => ({
+      id: r.userId,
+      name: r.name,
+      phone: r.phone,
+      joiningYear: r.joiningYear,
+      paid: r.paid,
+    })),
+    ...candidates.map((c) => ({ ...c, paid: false })),
+  ];
 
   return (
     <div className="space-y-6">
@@ -85,6 +103,15 @@ export default async function TripSettlePage({
                   tone={totals.outstanding > 0 ? "warn" : undefined}
                 />
               </div>
+              {/* These count riders, not rows. Saying so keeps a coordinator
+                  from reading "20 travelled" against a roster of 18 names and
+                  assuming the screen is wrong. */}
+              {totals.guests > 0 && (
+                <p className="w-full text-xs text-slate-500">
+                  Counting riders, including {totals.guests} unnamed{" "}
+                  {totals.guests === 1 ? "friend" : "friends"} someone brought.
+                </p>
+              )}
               <AmountForm tripId={trip.id} amount={trip.amountPerPerson} />
             </div>
 
@@ -142,11 +169,19 @@ export default async function TripSettlePage({
                           archived
                         </span>
                       )}
-                      <div className="text-sm text-slate-500">{formatPhone(r.phone)}</div>
+                      <div className="text-sm text-slate-500">
+                        {formatPhone(r.phone)}
+                        {r.guests > 0 &&
+                          ` · with ${r.guests} ${r.guests === 1 ? "friend" : "friends"} we can't name`}
+                      </div>
                       {r.paid && r.paidAt && (
                         <div className="text-xs text-emerald-700 dark:text-emerald-400">
                           paid {formatRupees(r.amount ?? 0)} · marked{" "}
                           {formatClockTime(r.paidAt)}
+                          {/* The whole point of recording the payer: weeks later
+                              this is the difference between "he never paid" and
+                              "his mate paid for him". */}
+                          {r.paidByName && ` · by ${r.paidByName}`}
                         </div>
                       )}
                     </div>
@@ -157,7 +192,31 @@ export default async function TripSettlePage({
                         userId={r.userId}
                         travelled={r.travelled}
                       />
+                      <GuestsControl
+                        tripId={trip.id}
+                        userId={r.userId}
+                        guests={r.guests}
+                      />
                       <PaidToggle tripId={trip.id} userId={r.userId} paid={r.paid} />
+                      <PaidForOthersForm
+                        tripId={trip.id}
+                        payer={{
+                          id: r.userId,
+                          name: r.name,
+                          joiningYear: r.joiningYear,
+                        }}
+                        others={payable}
+                        amountPerPerson={trip.amountPerPerson}
+                        guests={r.guests}
+                      />
+                      <RemoveFromTripControl
+                        tripId={trip.id}
+                        userId={r.userId}
+                        name={r.name}
+                        joiningYear={r.joiningYear}
+                        paid={r.paid}
+                        amount={r.amount}
+                      />
                     </div>
                   </li>
                 ))}

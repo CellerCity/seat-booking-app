@@ -1,0 +1,1 @@
+ALTER TABLE "attendance" ADD COLUMN "guests" integer DEFAULT 0 NOT NULL;

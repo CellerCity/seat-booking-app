@@ -29,7 +29,10 @@ import {
 import {
   markPaid,
   markUnpaid,
+  recordGroupPayment,
+  removeFromTrip,
   setAmountPerPerson,
+  setGuests,
   setTravelled,
   SettleError,
 } from "@/lib/settle";
@@ -165,8 +168,11 @@ export async function deleteTripAction(
   try {
     await requireCoordinator();
     const trip = await tripById(String(formData.get("tripId")));
-    await deleteTrip(trip);
+    // Only ever set by the trip-history control, which has already shown the
+    // coordinator what will be destroyed and had them confirm it.
+    await deleteTrip(trip, { withRecords: formData.get("withRecords") === "true" });
     revalidatePath("/admin");
+    revalidatePath("/admin/trips");
     return { ok: true };
   } catch (e) {
     return toState(e);
@@ -273,6 +279,81 @@ export async function markUnpaidAction(
     const coordinator = await requireCoordinator();
     const trip = await tripById(String(formData.get("tripId")));
     await markUnpaid(trip, String(formData.get("userId")), coordinator);
+    revalidateTrip(trip.id);
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
+/**
+ * Take someone off this trip — the wrong name tapped in a list of fifty.
+ *
+ * Deliberately not gated on their payment state. The screen warns and says what
+ * will be erased; refusing here is what left a coordinator with no way out.
+ */
+export async function removeFromTripAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const coordinator = await requireCoordinator();
+    const trip = await tripById(String(formData.get("tripId")));
+    await removeFromTrip(trip, String(formData.get("userId")), coordinator);
+    revalidateTrip(trip.id);
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
+/** How many unnamed friends came with this person. */
+export async function setGuestsAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const coordinator = await requireCoordinator();
+    const trip = await tripById(String(formData.get("tripId")));
+    const raw = String(formData.get("guests") ?? "").trim();
+
+    if (!/^\d+$/.test(raw)) return { error: "Enter a whole number of friends" };
+
+    await setGuests(trip, String(formData.get("userId")), Number(raw), coordinator);
+    revalidateTrip(trip.id);
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
+/**
+ * One payment covering several people.
+ *
+ * The named friends arrive as repeated `covers` fields — a checkbox list posts
+ * itself that way, and `getAll` is what reads it without the page having to
+ * encode a list into one string.
+ */
+export async function recordGroupPaymentAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const coordinator = await requireCoordinator();
+    const trip = await tripById(String(formData.get("tripId")));
+    const raw = String(formData.get("guests") ?? "0").trim();
+
+    if (raw && !/^\d+$/.test(raw)) return { error: "Enter a whole number of friends" };
+
+    await recordGroupPayment(
+      trip,
+      {
+        payerId: String(formData.get("payerId")),
+        coversUserIds: formData.getAll("covers").map(String).filter(Boolean),
+        guests: raw ? Number(raw) : 0,
+      },
+      coordinator,
+    );
     revalidateTrip(trip.id);
     return { ok: true };
   } catch (e) {

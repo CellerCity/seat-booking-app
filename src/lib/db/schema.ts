@@ -80,6 +80,12 @@ export const userActionEnum = pgEnum("user_action", [
   /** Left the group. Hidden everywhere, history intact. See members.ts. */
   "archive",
   "restore",
+  /**
+   * Taken off one trip as a mistaken entry. The attendance and dues rows are
+   * gone, so this is the only trace left that they were ever on it — which is
+   * exactly why it is written. The trip and any erased amount go in `reason`.
+   */
+  "remove_from_trip",
 ]);
 
 export const dueStatusEnum = pgEnum("due_status", ["unpaid", "claimed", "verified", "waived"]);
@@ -318,6 +324,19 @@ export const attendance = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     /** Marked at onward boarding, when a coordinator physically sees the person. */
     boarded: boolean("boarded").notNull().default(true),
+    /**
+     * Riders who came with this person and could not be named.
+     *
+     * The preferred answer is always to add the friend to the roster and give
+     * them their own row — they are then a person with a ledger, who can be
+     * chased or credited. This exists for the case that actually happens a week
+     * later: everyone agrees three people rode and one payment covered them, and
+     * nobody can remember the third name. Recording "and two others" keeps the
+     * rider count and the money honest instead of silently losing a share, and
+     * the guest can still be promoted to a named row afterwards by adding them
+     * and moving the count down.
+     */
+    guests: integer("guests").notNull().default(0),
     markedAt: timestamp("marked_at", { withTimezone: true }).notNull().defaultNow(),
     markedBy: uuid("marked_by")
       .notNull()

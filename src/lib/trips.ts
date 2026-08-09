@@ -457,7 +457,10 @@ export async function cancelTrip(trip: Trip, reason: string, coordinator: User):
  * than being quietly destroyed. Responses and their audit events do go — that
  * is the point of the feature.
  */
-export async function deleteTrip(trip: Trip): Promise<void> {
+export async function deleteTrip(
+  trip: Trip,
+  opts: { withRecords?: boolean } = {},
+): Promise<void> {
   if (trip.status === "settled") {
     throw new TripError("That trip is settled — its record has to stay");
   }
@@ -468,13 +471,27 @@ export async function deleteTrip(trip: Trip): Promise<void> {
     db.select({ n: count() }).from(settlements).where(eq(settlements.tripId, trip.id)),
   ]);
 
-  if (dueRow.n > 0 || settlementRow.n > 0) {
-    throw new TripError("That trip has money against it — cancel it instead of deleting");
-  }
-  if (attendanceRow.n > 0) {
-    throw new TripError("People are marked as having travelled on that trip — cancel it instead");
+  // Two different acts wearing one name. The dashboard's Delete is for the trip
+  // created by mistake five minutes ago, and there the guards are right: a
+  // coordinator clearing a duplicate should never be able to take a week of
+  // attendance with it by accident.
+  //
+  // `withRecords` is the other one — a coordinator on the trip history screen
+  // who has been shown exactly what is about to be destroyed and has said yes
+  // to that. Refusing there leaves no way at all to remove a bad trip, which is
+  // its own kind of broken. The confirmation is the safeguard; this is not the
+  // place to also make the decision.
+  if (!opts.withRecords) {
+    if (dueRow.n > 0 || settlementRow.n > 0) {
+      throw new TripError("That trip has money against it — cancel it instead of deleting");
+    }
+    if (attendanceRow.n > 0) {
+      throw new TripError("People are marked as having travelled on that trip — cancel it instead");
+    }
   }
 
+  // Everything hanging off a trip cascades from this row: responses, attendance,
+  // dues and their events. Nothing about the people themselves is touched.
   await db.delete(trips).where(eq(trips.id, trip.id));
 }
 

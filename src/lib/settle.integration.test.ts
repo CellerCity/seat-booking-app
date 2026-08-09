@@ -23,11 +23,16 @@ const {
   getAddableTravellers,
   markPaid,
   markUnpaid,
+  recordGroupPayment,
+  removeFromTrip,
   setAmountPerPerson,
+  setGuests,
   setTravelled,
   totalsFor,
 } = await import("./settle");
-const { attendance, dueEvents, dues, responses, trips, users } = await import("./db/schema");
+const { attendance, dueEvents, dues, responses, trips, userEvents, users } = await import(
+  "./db/schema"
+);
 
 let coordinator: Awaited<ReturnType<typeof makeUser>>;
 let trip: typeof trips.$inferSelect;
@@ -56,6 +61,19 @@ async function makeTrip(token = "settle-token") {
 
 async function book(userId: string) {
   await testDb.insert(responses).values({ tripId: trip.id, userId, going: true });
+}
+
+/**
+ * Set what each rider owes and hand back the trip as it now stands.
+ *
+ * The write functions take the trip they were given, so a test that sets an
+ * amount and then keeps passing the stale object bills everyone ₹0 — and the
+ * assertions still read as though they were about the amount.
+ */
+async function priced(rupees: number) {
+  await setAmountPerPerson(trip, rupees, coordinator);
+  const [t] = await testDb.select().from(trips).where(eq(trips.id, trip.id));
+  return t;
 }
 
 beforeEach(async () => {
@@ -252,6 +270,9 @@ describe("the totals a coordinator reads", () => {
       name: `P${i}`,
       phone: "+9190000000" + i,
       joiningYear: null,
+      guests: 0,
+      paidByUserId: null,
+      paidByName: null,
       booked: true,
       paidAt: null,
       archived: false,
@@ -276,6 +297,9 @@ describe("the totals a coordinator reads", () => {
           name: "P",
           phone: "+919000000001",
           joiningYear: null,
+          guests: 0,
+          paidByUserId: null,
+          paidByName: null,
           booked: true,
           travelled: true,
           paid: true,
@@ -319,5 +343,229 @@ describe("attendance rows", () => {
     const rows = await testDb.select().from(attendance).where(eq(attendance.tripId, trip.id));
     expect(rows).toHaveLength(1);
     expect(rows[0].boarded).toBe(false);
+  });
+});
+
+describe("one payment covering several people", () => {
+  it("settles the payer and each named friend, and records who paid", async () => {
+    const payer = await makeUser("Rahul", "+919000000001");
+    const friend = await makeUser("Priya", "+919000000002");
+    await book(payer.id);
+    await book(friend.id);
+
+    await recordGroupPayment(
+      await priced(150),
+      { payerId: payer.id, coversUserIds: [friend.id], guests: 0 },
+      coordinator,
+    );
+
+    const ledger = await getTripLedger(trip.id);
+    const rahul = ledger.find((r) => r.name === "Rahul")!;
+    const priya = ledger.find((r) => r.name === "Priya")!;
+
+    expect(rahul.paid).toBe(true);
+    expect(priya.paid).toBe(true);
+    // The share stays the friend's own. What is recorded is who settled it —
+    // the difference between "she never paid" and "Rahul paid for her".
+    expect(priya.amount).toBe(150);
+    expect(priya.paidByName).toBe("Rahul");
+    expect(rahul.paidByUserId).toBeNull();
+  });
+
+  it("marks the friends as having travelled, without inventing bookings", async () => {
+    const payer = await makeUser("Rahul", "+919000000001");
+    const friend = await makeUser("Priya", "+919000000002");
+    await book(payer.id);
+
+    await recordGroupPayment(
+      trip,
+      { payerId: payer.id, coversUserIds: [friend.id], guests: 0 },
+      coordinator,
+    );
+
+    const priya = (await getTripLedger(trip.id)).find((r) => r.name === "Priya")!;
+    expect(priya.travelled).toBe(true);
+    // The response table is the demand signal from before the trip. Writing one
+    // now would rewrite the count that was read to the contractor.
+    expect(priya.booked).toBe(false);
+  });
+
+  it("bills the payer for the friends nobody can name", async () => {
+    const payer = await makeUser("Rahul", "+919000000001");
+    await book(payer.id);
+
+    await recordGroupPayment(
+      await priced(150),
+      { payerId: payer.id, coversUserIds: [], guests: 2 },
+      coordinator,
+    );
+
+    const ledger = await getTripLedger(trip.id);
+    expect(ledger[0].guests).toBe(2);
+    expect(ledger[0].amount).toBe(450); // three riders at 150
+
+    const totals = totalsFor(ledger, 150);
+    expect(totals.travelled).toBe(3);
+    expect(totals.paid).toBe(3);
+    expect(totals.guests).toBe(2);
+    expect(totals.collectedRupees).toBe(450);
+  });
+
+  it("charges the payer once however they are listed", async () => {
+    const payer = await makeUser("Rahul", "+919000000001");
+    await book(payer.id);
+
+    await recordGroupPayment(
+      await priced(150),
+      { payerId: payer.id, coversUserIds: [payer.id], guests: 0 },
+      coordinator,
+    );
+
+    const rows = await testDb.select().from(dues).where(eq(dues.tripId, trip.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].amount).toBe(150);
+  });
+
+  it("lands as one act — a bad name in the list settles nobody", async () => {
+    const payer = await makeUser("Rahul", "+919000000001");
+    await book(payer.id);
+    await setAmountPerPerson(trip, 150, coordinator);
+
+    await expect(
+      recordGroupPayment(
+        trip,
+        { payerId: payer.id, coversUserIds: ["00000000-0000-0000-0000-000000000000"], guests: 0 },
+        coordinator,
+      ),
+    ).rejects.toThrow(/No such person/);
+
+    // Not even the payer, who would otherwise have been the first write through.
+    expect(await testDb.select().from(dues).where(eq(dues.tripId, trip.id))).toHaveLength(0);
+  });
+
+  it("refuses a crowd, which is a typo rather than a cab", async () => {
+    const payer = await makeUser("Rahul", "+919000000001");
+    await book(payer.id);
+
+    await expect(
+      recordGroupPayment(trip, { payerId: payer.id, coversUserIds: [], guests: 40 }, coordinator),
+    ).rejects.toThrow(/roster/);
+  });
+});
+
+describe("unnamed friends", () => {
+  it("counts them as riders on an unpaid row too", async () => {
+    const rider = await makeUser("Priya", "+919000000001");
+    await book(rider.id);
+    await setTravelled(trip, rider.id, true, coordinator);
+
+    await setGuests(trip, rider.id, 2, coordinator);
+
+    const totals = totalsFor(await getTripLedger(trip.id), 150);
+    expect(totals.travelled).toBe(3);
+    expect(totals.outstanding).toBe(3);
+    // Three shares are out, not one. Billing only the named rider is how the
+    // group ends up short without anyone noticing.
+    expect(totals.outstandingRupees).toBe(450);
+  });
+
+  it("amends a settled amount when the count changes", async () => {
+    const rider = await makeUser("Priya", "+919000000001");
+    await book(rider.id);
+    const priced150 = await priced(150);
+    await markPaid(priced150, rider.id, coordinator);
+
+    await setGuests(priced150, rider.id, 1, coordinator);
+
+    expect((await getTripLedger(trip.id))[0].amount).toBe(300);
+
+    const events = await testDb.select().from(dueEvents);
+    expect(events.some((e) => e.action === "amend" && e.amount === 300)).toBe(true);
+  });
+
+  it("applies a changed per-person amount per rider, not per row", async () => {
+    const rider = await makeUser("Priya", "+919000000001");
+    await book(rider.id);
+    const priced150 = await priced(150);
+    await setGuests(priced150, rider.id, 2, coordinator);
+    await markPaid(priced150, rider.id, coordinator);
+
+    await setAmountPerPerson(trip, 200, coordinator);
+
+    expect((await getTripLedger(trip.id))[0].amount).toBe(600);
+  });
+
+  it("clears them when the person is marked as not having travelled", async () => {
+    const rider = await makeUser("Priya", "+919000000001");
+    await book(rider.id);
+    await setGuests(trip, rider.id, 2, coordinator);
+
+    await setTravelled(trip, rider.id, false, coordinator);
+
+    expect((await getTripLedger(trip.id))[0].guests).toBe(0);
+  });
+});
+
+describe("removing someone added by mistake", () => {
+  it("takes them off the trip entirely", async () => {
+    const wrong = await makeUser("Priya", "+919000000001");
+    await setTravelled(trip, wrong.id, true, coordinator);
+
+    await removeFromTrip(trip, wrong.id, coordinator);
+
+    expect(await getTripLedger(trip.id)).toHaveLength(0);
+    expect(await testDb.select().from(attendance)).toHaveLength(0);
+  });
+
+  it("does not refuse because a payment was recorded", async () => {
+    const wrong = await makeUser("Priya", "+919000000001");
+    await markPaid(await priced(150), wrong.id, coordinator);
+
+    // The point of it: being told to undo the payment first, on the screen
+    // where the payment itself was the mistake, is a dead end.
+    await removeFromTrip(trip, wrong.id, coordinator);
+
+    expect(await testDb.select().from(dues)).toHaveLength(0);
+    expect(await getTripLedger(trip.id)).toHaveLength(0);
+  });
+
+  it("leaves the booking, the person and their other trips alone", async () => {
+    const rider = await makeUser("Priya", "+919000000001");
+    const other = await makeTrip("other-trip-token");
+    await book(rider.id);
+    await setTravelled(trip, rider.id, true, coordinator);
+    await setTravelled(other, rider.id, true, coordinator);
+
+    await removeFromTrip(trip, rider.id, coordinator);
+
+    // They booked, so they belong on the list — just back to unmarked.
+    const ledger = await getTripLedger(trip.id);
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0].travelled).toBeNull();
+    expect(await getTripLedger(other.id)).toHaveLength(1);
+    expect(await testDb.select().from(users).where(eq(users.id, rider.id))).toHaveLength(1);
+  });
+
+  it("leaves a trace with a name and a time on it", async () => {
+    const wrong = await makeUser("Priya", "+919000000001");
+    await markPaid(await priced(150), wrong.id, coordinator);
+
+    await removeFromTrip(trip, wrong.id, coordinator);
+
+    const [event] = await testDb
+      .select()
+      .from(userEvents)
+      .where(eq(userEvents.userId, wrong.id));
+
+    expect(event.action).toBe("remove_from_trip");
+    expect(event.actorId).toBe(coordinator.id);
+    expect(event.reason).toContain("150");
+  });
+
+  it("says so when there is nothing recorded to remove", async () => {
+    const rider = await makeUser("Priya", "+919000000001");
+    await book(rider.id);
+
+    await expect(removeFromTrip(trip, rider.id, coordinator)).rejects.toThrow(/nothing recorded/);
   });
 });
