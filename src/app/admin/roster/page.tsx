@@ -7,6 +7,7 @@ import { getCurrentTrip } from "@/lib/trips";
 import { getArchivedMembers, getPendingMembers } from "@/lib/members";
 import { formatClockTime, formatDateTime } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
+import { PersonName } from "../person-name";
 import {
   AddMemberForm,
   ApprovalButtons,
@@ -136,7 +137,7 @@ export default async function RosterPage() {
                 className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 dark:bg-slate-900"
               >
                 <div>
-                  <span className="font-medium">{p.name}</span>
+                  <PersonName name={p.name} joiningYear={p.joiningYear} className="font-medium" />
                   <span className="ml-2 text-sm text-slate-500">
                     {formatPhone(p.phone)}
                   </span>
@@ -164,7 +165,7 @@ export default async function RosterPage() {
               className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
             >
               <div className="min-w-0">
-                <span className="font-medium">{p.name}</span>
+                <PersonName name={p.name} joiningYear={p.joiningYear} className="font-medium" />
                 {p.role === "coordinator" && (
                   <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-950 dark:text-blue-300">
                     coordinator
@@ -175,12 +176,11 @@ export default async function RosterPage() {
                     guest
                   </span>
                 )}
+                {/* No joining year here — it sits against the name now, on
+                    every screen rather than only this one. */}
                 <div className="text-sm text-slate-500">
                   {formatPhone(p.phone)}
                   {p.affiliation && ` · ${p.affiliation}`}
-                  {/* Only when it is there. A blank slot for everyone imported
-                      from the CSV would be noise on every row. */}
-                  {p.joiningYear && ` · joined ${p.joiningYear}`}
                   {p.role === "coordinator" && p.email && ` · ${p.email}`}
                 </div>
                 {p.going && p.firstRespondedAt && (
@@ -214,14 +214,25 @@ export default async function RosterPage() {
                 <RoleControls
                   userId={p.id}
                   name={p.name}
+                  joiningYear={p.joiningYear}
                   email={p.email}
                   isCoordinator={p.role === "coordinator"}
                   isSelf={p.id === me.id}
                 />
                 {p.id !== me.id && (
-                  <ArchiveControl userId={p.id} name={p.name} archived={false} />
+                  <ArchiveControl
+                    userId={p.id}
+                    name={p.name}
+                    joiningYear={p.joiningYear}
+                    archived={false}
+                  />
                 )}
-                <BlockControl userId={p.id} name={p.name} blocked={false} />
+                <BlockControl
+                  userId={p.id}
+                  name={p.name}
+                  joiningYear={p.joiningYear}
+                  blocked={false}
+                />
               </div>
             </PersonRow>
           ))}
@@ -242,10 +253,10 @@ export default async function RosterPage() {
                 className="flex items-center justify-between gap-3 py-2"
               >
                 <div>
-                  <span className="font-medium">{p.name}</span>
+                  <PersonName name={p.name} joiningYear={p.joiningYear} className="font-medium" />
                   <div className="text-sm text-slate-500">{p.blockedReason}</div>
                 </div>
-                <BlockControl userId={p.id} name={p.name} blocked />
+                <BlockControl userId={p.id} name={p.name} joiningYear={p.joiningYear} blocked />
               </PersonRow>
             ))}
           </ul>
@@ -270,14 +281,18 @@ export default async function RosterPage() {
                 className="flex flex-wrap items-center justify-between gap-3 py-2"
               >
                 <div>
-                  <span className="font-medium">{p.name}</span>
+                  <PersonName name={p.name} joiningYear={p.joiningYear} className="font-medium" />
                   <div className="text-sm text-slate-500">
                     {formatPhone(p.phone)}
                     {p.affiliation && ` · ${p.affiliation}`}
-                    {p.joiningYear && ` · joined ${p.joiningYear}`}
                   </div>
                 </div>
-                <ArchiveControl userId={p.id} name={p.name} archived />
+                <ArchiveControl
+                  userId={p.id}
+                  name={p.name}
+                  joiningYear={p.joiningYear}
+                  archived
+                />
               </PersonRow>
             ))}
           </ul>

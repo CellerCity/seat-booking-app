@@ -25,6 +25,8 @@ export type LedgerRow = {
   userId: string;
   name: string;
   phone: string;
+  /** Shown beside the name — several people here share one. */
+  joiningYear: number | null;
   /** They said they were going. Absent for someone added after the fact. */
   booked: boolean;
   /** true travelled · false explicitly did not · null nobody has said. */
@@ -56,6 +58,7 @@ export async function getTripLedger(tripId: string): Promise<LedgerRow[]> {
       userId: users.id,
       name: users.name,
       phone: users.phone,
+      joiningYear: users.joiningYear,
       isActive: users.isActive,
       going: responses.going,
       travelled: attendance.boarded,
@@ -74,6 +77,7 @@ export async function getTripLedger(tripId: string): Promise<LedgerRow[]> {
     userId: r.userId,
     name: r.name,
     phone: r.phone,
+    joiningYear: r.joiningYear,
     booked: r.going ?? false,
     travelled: r.travelled,
     paid: r.dueStatus === "verified" || r.dueStatus === "waived",

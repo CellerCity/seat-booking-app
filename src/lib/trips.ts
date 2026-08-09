@@ -201,6 +201,7 @@ export async function getResponseFeed(tripId: string, limit = 100) {
       occurredAt: responseEvents.occurredAt,
       source: responseEvents.source,
       userName: users.name,
+      userJoiningYear: users.joiningYear,
       userId: users.id,
     })
     .from(responseEvents)

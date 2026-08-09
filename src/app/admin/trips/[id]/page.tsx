@@ -6,6 +6,7 @@ import { getAddableTravellers, getTripLedger, totalsFor } from "@/lib/settle";
 import { formatRupees } from "@/lib/cost";
 import { formatClockTime, formatTime, formatTripDate } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
+import { PersonName } from "../../person-name";
 import {
   AddTravellerForm,
   AmountForm,
@@ -126,7 +127,11 @@ export default async function TripSettlePage({
                     className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
                   >
                     <div className="min-w-0">
-                      <span className="font-medium">{r.name}</span>
+                      <PersonName
+                        name={r.name}
+                        joiningYear={r.joiningYear}
+                        className="font-medium"
+                      />
                       {!r.booked && (
                         <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
                           added after

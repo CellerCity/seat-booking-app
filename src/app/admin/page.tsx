@@ -13,6 +13,7 @@ import {
   relativeTime,
 } from "@/lib/format";
 import { getBaseUrl } from "@/lib/base-url";
+import { PersonName } from "./person-name";
 import {
   CancelTripButton,
   CopyCountButton,
@@ -234,7 +235,7 @@ export default async function DashboardPage({
                 className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 dark:bg-slate-900"
               >
                 <span>
-                  {b.name}{" "}
+                  <PersonName name={b.name} joiningYear={b.joiningYear} />{" "}
                   <span className="text-sm text-slate-500">
                     booked {formatClockTime(b.firstRespondedAt)}
                   </span>
@@ -256,7 +257,7 @@ export default async function DashboardPage({
           <ul className="mt-3 space-y-1 text-sm">
             {withdrawals.map((w) => (
               <li key={w.userId} className="flex justify-between">
-                <span>{w.name}</span>
+                <PersonName name={w.name} joiningYear={w.joiningYear} />
                 <span className="text-slate-500">{formatClockTime(w.updatedAt)}</span>
               </li>
             ))}
@@ -279,7 +280,7 @@ export default async function DashboardPage({
             {feed.map((e) => (
               <li key={e.id} className="flex items-center justify-between py-2">
                 <span>
-                  {e.userName}{" "}
+                  <PersonName name={e.userName} joiningYear={e.userJoiningYear} />{" "}
                   <span
                     className={
                       e.action === "withdraw"
@@ -334,6 +335,7 @@ async function getLateBookings(tripId: string, lockedAt: Date) {
     .select({
       userId: users.id,
       name: users.name,
+      joiningYear: users.joiningYear,
       firstRespondedAt: responses.firstRespondedAt,
     })
     .from(responses)
@@ -351,7 +353,12 @@ async function getLateBookings(tripId: string, lockedAt: Date) {
 
 async function getPostLockWithdrawals(tripId: string, lockedAt: Date) {
   return db
-    .select({ userId: users.id, name: users.name, updatedAt: responses.updatedAt })
+    .select({
+      userId: users.id,
+      name: users.name,
+      joiningYear: users.joiningYear,
+      updatedAt: responses.updatedAt,
+    })
     .from(responses)
     .innerJoin(users, eq(responses.userId, users.id))
     .where(

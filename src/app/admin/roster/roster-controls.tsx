@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { PersonName } from "../person-name";
 import {
   addMemberAction,
   approveMemberAction,
@@ -28,10 +29,12 @@ import {
 export function ArchiveControl({
   userId,
   name,
+  joiningYear,
   archived,
 }: {
   userId: string;
   name: string;
+  joiningYear?: number | null;
   archived: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
@@ -75,7 +78,7 @@ export function ArchiveControl({
           <form action={remove} className="flex items-center gap-2">
             <input type="hidden" name="userId" value={userId} />
             <span className="text-xs text-red-700 dark:text-red-400">
-              Erase {name} permanently?
+              Erase <PersonName name={name} joiningYear={joiningYear} /> permanently?
             </span>
             <button
               type="submit"
@@ -117,7 +120,8 @@ export function ArchiveControl({
     <form action={archive} className="rounded-lg border border-slate-300 p-3 dark:border-slate-700">
       <input type="hidden" name="userId" value={userId} />
       <p className="text-xs">
-        Archive <strong>{name}</strong>? They come off the roster and out of every
+        Archive <PersonName name={name} joiningYear={joiningYear} className="font-bold" />?
+        They come off the roster and out of every
         count, and can no longer book. Their past trips and payments stay on the
         record.
       </p>
@@ -284,12 +288,14 @@ export function EditMemberForm({
 export function RoleControls({
   userId,
   name,
+  joiningYear,
   email,
   isCoordinator,
   isSelf,
 }: {
   userId: string;
   name: string;
+  joiningYear?: number | null;
   email: string | null;
   isCoordinator: boolean;
   isSelf: boolean;
@@ -330,7 +336,8 @@ export function RoleControls({
       <form action={demote} className="rounded-lg border border-slate-300 p-3 dark:border-slate-700">
         <input type="hidden" name="userId" value={userId} />
         <p className="text-xs">
-          Remove coordinator access from <strong>{name}</strong>? They stay on the roster
+          Remove coordinator access from{" "}
+          <PersonName name={name} joiningYear={joiningYear} className="font-bold" />? They stay on the roster
           as a traveller and keep their booking history.
         </p>
         <div className="mt-2 flex gap-2">
@@ -358,7 +365,8 @@ export function RoleControls({
     <form action={promote} className="rounded-lg border border-slate-300 p-3 dark:border-slate-700">
       <input type="hidden" name="userId" value={userId} />
       <p className="text-xs">
-        Make <strong>{name}</strong> a coordinator? They will see every phone number,
+        Make <PersonName name={name} joiningYear={joiningYear} className="font-bold" /> a
+        coordinator? They will see every phone number,
         the full roster and all counts.
       </p>
       <label className="mt-2 block text-xs">
@@ -445,10 +453,12 @@ export function ApprovalButtons({ userId }: { userId: string }) {
 export function BlockControl({
   userId,
   name,
+  joiningYear,
   blocked,
 }: {
   userId: string;
   name: string;
+  joiningYear?: number | null;
   blocked: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -492,8 +502,8 @@ export function BlockControl({
     <form action={block} className="w-full space-y-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-800">
       <input type="hidden" name="userId" value={userId} />
       <p className="text-sm">
-        Block {name}? They lose access immediately. Any dues they owe stay on the
-        ledger.
+        Block <PersonName name={name} joiningYear={joiningYear} className="font-semibold" />?
+        They lose access immediately. Any dues they owe stay on the ledger.
       </p>
       <input
         name="reason"

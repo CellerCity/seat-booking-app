@@ -27,6 +27,7 @@ export async function getPendingMembers() {
       id: users.id,
       name: users.name,
       phone: users.phone,
+      joiningYear: users.joiningYear,
       createdAt: users.createdAt,
       hasBooked: sql<boolean>`exists (
         select 1 from ${responses}

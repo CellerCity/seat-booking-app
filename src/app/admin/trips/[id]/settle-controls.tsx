@@ -3,6 +3,7 @@
 import { useActionState, useDeferredValue, useMemo, useState } from "react";
 import { filterPeople } from "@/lib/people-search";
 import { formatPhone } from "@/lib/phone";
+import { PersonName } from "../../person-name";
 import {
   markPaidAction,
   markUnpaidAction,
@@ -258,10 +259,13 @@ export function AddTravellerForm({
                       : "hover:bg-slate-50 dark:hover:bg-slate-800"
                   }`}
                 >
-                  <span className="font-medium">{c.name}</span>
+                  <PersonName
+                    name={c.name}
+                    joiningYear={c.joiningYear}
+                    className="font-medium"
+                  />
                   <span className={`text-xs ${picked ? "" : "text-slate-500"}`}>
                     {formatPhone(c.phone)}
-                    {c.joiningYear && ` · ${c.joiningYear}`}
                   </span>
                 </button>
               </li>
@@ -299,7 +303,12 @@ export function AddTravellerForm({
         <span className="text-sm text-slate-500">
           {chosen ? (
             <>
-              for <strong className="text-slate-900 dark:text-slate-100">{chosen.name}</strong>{" "}
+              for{" "}
+              <PersonName
+                name={chosen.name}
+                joiningYear={chosen.joiningYear}
+                className="font-bold text-slate-900 dark:text-slate-100"
+              />{" "}
               · {formatPhone(chosen.phone)}
             </>
           ) : (
