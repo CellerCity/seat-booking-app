@@ -37,10 +37,12 @@ import {
   setTravelled,
   SettleError,
 } from "@/lib/settle";
+import { PayError, setCollector, setUpiVpa } from "@/lib/pay";
 import { db } from "@/lib/db";
 import { trips, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { PhoneError } from "@/lib/phone";
+import { UpiError } from "@/lib/upi";
 import { JoiningYearError } from "@/lib/joining-year";
 
 /**
@@ -58,6 +60,8 @@ function toState(e: unknown): ActionState {
     e instanceof TripError ||
     e instanceof PhoneError ||
     e instanceof SettleError ||
+    e instanceof PayError ||
+    e instanceof UpiError ||
     e instanceof JoiningYearError
   ) {
     return { error: e.message };
@@ -75,6 +79,55 @@ async function userById(id: string) {
   const [user] = await db.select().from(users).where(eq(users.id, id)).limit(1);
   if (!user) throw new MemberError("No such person");
   return user;
+}
+
+// --- Collecting the money ---------------------------------------------------
+
+/**
+ * Name whoever is collecting this week.
+ *
+ * Picked from the coordinators who have added a UPI ID rather than typed in, so
+ * the address fifty people pay against is one its owner entered themselves. The
+ * trip keeps a snapshot — see `setCollector`.
+ */
+export async function setCollectorAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    await requireCoordinator();
+    const trip = await tripById(String(formData.get("tripId")));
+    const raw = String(formData.get("collectorId") ?? "");
+
+    await setCollector(trip, raw === "" ? null : raw);
+    revalidatePath(`/admin/trips/${trip.id}`);
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
+}
+
+/**
+ * A coordinator's own UPI address.
+ *
+ * Deliberately only ever their own: it is taken from the session, never from the
+ * form. Letting one coordinator edit another's would mean a single roster tap
+ * could redirect a whole week's fares, and there is no reason anyone needs it.
+ */
+export async function setUpiVpaAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const coordinator = await requireCoordinator();
+    const raw = String(formData.get("vpa") ?? "");
+
+    await setUpiVpa(coordinator.id, raw.trim() === "" ? null : raw);
+    revalidatePath("/admin/trips", "layout");
+    return { ok: true };
+  } catch (e) {
+    return toState(e);
+  }
 }
 
 // --- Trip -------------------------------------------------------------------

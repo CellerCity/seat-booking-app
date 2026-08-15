@@ -125,6 +125,16 @@ export const users = pgTable(
      * actually uses to tell them apart. Nothing keys on it.
      */
     joiningYear: integer("joining_year"),
+    /**
+     * Their own UPI address, for the weeks they are the one collecting.
+     *
+     * Set once by the person themselves rather than typed into each trip: a VPA
+     * retyped weekly is a VPA that eventually gets a digit wrong, and the cost
+     * of that mistake is fifty people paying a stranger. Only ever read for
+     * coordinators, but the column is on every user because who coordinates
+     * changes and a graduating batch shouldn't take the detail with them.
+     */
+    upiVpa: text("upi_vpa"),
     approvalStatus: approvalStatusEnum("approval_status").notNull().default("pending"),
     /** Required when blocking; kept after unblocking as part of the record. */
     blockedReason: text("blocked_reason"),
@@ -184,6 +194,20 @@ export const trips = pgTable(
      * which is a fine state to settle up in.
      */
     amountPerPerson: integer("amount_per_person"),
+
+    /**
+     * Who is collecting the money this week.
+     *
+     * It rotates — whichever coordinator handled the contractor call usually
+     * takes the fares too — so the payee is a property of the trip, not of the
+     * app. The VPA and name are *snapshots* taken when the collector is chosen
+     * rather than read live from `users.upi_vpa`, so a coordinator changing
+     * their UPI address next year cannot rewrite who last March's payments
+     * were made to.
+     */
+    collectedByUserId: uuid("collected_by_user_id").references(() => users.id),
+    collectUpiVpa: text("collect_upi_vpa"),
+    collectUpiName: text("collect_upi_name"),
 
     /** Pasted into WhatsApp. ≥128 bits of randomness: forwardable, not guessable. */
     linkToken: text("link_token").notNull().unique(),
@@ -384,6 +408,15 @@ export const dues = pgTable(
     }>(),
     status: dueStatusEnum("status").notNull().default("unpaid"),
     claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    /**
+     * Rupees the traveller said they sent, frozen at the moment they said it.
+     *
+     * Not the same fact as `amount`, which is what they owe *now* and is amended
+     * when the fare is corrected. Keeping both is what lets the collection list
+     * say "claimed ₹150 · now ₹170" instead of showing a tick against a figure
+     * nobody actually paid.
+     */
+    claimedAmount: integer("claimed_amount"),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     verifiedBy: uuid("verified_by").references(() => users.id),
     /** Someone paid on this person's behalf — routine, and a main source of

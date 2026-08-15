@@ -1,9 +1,12 @@
 import { notFound } from "next/navigation";
 import { getCurrentTraveller, isBlocked, isPending } from "@/lib/auth/traveller";
+import { getPayView } from "@/lib/pay";
 import { getResponse, getTripByToken } from "@/lib/trips";
 import { formatDeadline, formatTime, formatTripDate, relativeTime } from "@/lib/format";
 import { BookingControls } from "./booking-controls";
 import { IdentifyForm } from "./identify-form";
+import { PaySection } from "./pay-section";
+import { SignOutLink } from "./sign-out";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +45,9 @@ export default async function TripPage({
   const notOpenYet = trip.status === "draft";
   const locked = trip.lockedAt !== null;
   const response = user ? await getResponse(trip.id, user.id) : null;
+  // Everything about money is decided server-side from what a coordinator
+  // recorded. `hidden` for anyone who owes nothing on this trip.
+  const pay = user ? await getPayView(trip, user) : null;
 
   // Null once it has passed: a deadline in the past is not something to hurry
   // someone towards, and this trip may not have one at all.
@@ -92,9 +98,31 @@ export default async function TripPage({
             deadlineLabel={deadlineLabel}
           />
 
-          <p className="text-center text-xs text-slate-400">
-            Signed in as {user.name}
-          </p>
+          {pay && (
+            <PaySection
+              token={token}
+              view={pay}
+              whoami={{
+                name: user.name,
+                joiningYear: user.joiningYear,
+                phone: user.phone,
+              }}
+            />
+          )}
+
+          {/* Was a dead line of text saying who you were signed in as, which is
+              no help at all to the person it is wrong for. Someone who typed a
+              digit wrong needs a way out that isn't clearing their history. */}
+          <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
+            <span>
+              Signed in as {user.name}
+              {user.joiningYear != null && (
+                <span className="ml-1 tabular-nums">{user.joiningYear}</span>
+              )}
+            </span>
+            <span aria-hidden>·</span>
+            <SignOutLink label="Not you?" className="text-xs text-slate-400" />
+          </div>
         </div>
       )}
     </Shell>

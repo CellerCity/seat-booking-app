@@ -38,6 +38,17 @@ export type LedgerRow = {
   /** Unnamed riders who came with them. Billed to them along with their own share. */
   guests: number;
   paid: boolean;
+  /**
+   * They have said they paid, and nobody has checked yet.
+   *
+   * The whole point of the traveller-facing pay screen: this is the person who
+   * would otherwise have paid and then been chased anyway, because the WhatsApp
+   * poll had nowhere to record that they had.
+   */
+  claimed: boolean;
+  claimedAt: Date | null;
+  /** What they said they sent. Differs from `amount` if the fare moved after. */
+  claimedAmount: number | null;
   /** Set when someone else settled this person's share. */
   paidByUserId: string | null;
   paidByName: string | null;
@@ -80,6 +91,8 @@ export async function getTripLedger(tripId: string): Promise<LedgerRow[]> {
       dueStatus: dues.status,
       amount: dues.amount,
       verifiedAt: dues.verifiedAt,
+      claimedAt: dues.claimedAt,
+      claimedAmount: dues.claimedAmount,
       paidByUserId: dues.paidByUserId,
       paidByName: payer.name,
     })
@@ -100,6 +113,9 @@ export async function getTripLedger(tripId: string): Promise<LedgerRow[]> {
     travelled: r.travelled,
     guests: r.guests ?? 0,
     paid: r.dueStatus === "verified" || r.dueStatus === "waived",
+    claimed: r.dueStatus === "claimed",
+    claimedAt: r.claimedAt,
+    claimedAmount: r.claimedAmount,
     paidByUserId: r.paidByUserId,
     paidByName: r.paidByName,
     amount: r.amount,
@@ -115,6 +131,8 @@ export type LedgerTotals = {
   paid: number;
   /** Riders whose share is still out. */
   outstanding: number;
+  /** Of those, riders who say they have paid and are waiting to be checked. */
+  claimed: number;
   /** Booked but nobody has said whether they turned up. */
   unmarked: number;
   /** Unnamed riders among the above, so the number is never quietly inflated. */
@@ -142,6 +160,7 @@ export function totalsFor(rows: LedgerRow[], amountPerPerson: number | null): Le
     travelled: riders(travelled),
     paid: riders(paid),
     outstanding: riders(unpaid),
+    claimed: riders(unpaid.filter((r) => r.claimed)),
     unmarked: rows.filter((r) => r.travelled === null).length,
     guests: travelled.reduce((sum, r) => sum + r.guests, 0),
     collectedRupees: paid.reduce((sum, r) => sum + (r.amount ?? 0), 0),
@@ -229,6 +248,32 @@ export async function setTravelled(
 }
 
 /**
+ * Unnamed riders to bill alongside this person's own seat.
+ *
+ * Attendance wins where it exists — a coordinator marking the bus saw who was
+ * on it. Where nobody has marked yet, the person's own booking is the best
+ * statement of how many seats they took, and using it is what stops someone who
+ * booked for two friends being quoted three shares on their pay screen and then
+ * silently recorded as having settled one.
+ */
+async function guestsFor(
+  tx: Tx,
+  tripId: string,
+  userId: string,
+  attendanceGuests: number | undefined,
+): Promise<number> {
+  if (attendanceGuests !== undefined) return attendanceGuests;
+
+  const [resp] = await tx
+    .select({ guests: responses.guests })
+    .from(responses)
+    .where(and(eq(responses.tripId, tripId), eq(responses.userId, userId)))
+    .limit(1);
+
+  return resp?.guests ?? 0;
+}
+
+/**
  * Record that someone has settled up, inside a caller's transaction.
  *
  * Marking an unmarked person paid also marks them as having travelled, which is
@@ -268,10 +313,11 @@ async function markPaidTx(
     });
   }
 
-  // Their own share plus anyone unnamed they brought. Read from the attendance
-  // row rather than passed in, so the amount can never disagree with the rider
-  // count the same row produces on the ledger.
-  const guests = existing?.guests ?? 0;
+  // Their own share plus anyone unnamed they brought. Read from the database
+  // rather than passed in, so the amount can never disagree with the rider
+  // count the same rows produce on the ledger — or with the figure the traveller
+  // was quoted on their own pay screen, which uses this same fallback.
+  const guests = await guestsFor(tx, trip.id, userId, existing?.guests);
   const amount = (trip.amountPerPerson ?? 0) * (1 + guests);
 
   const [due] = await tx
@@ -610,20 +656,27 @@ export async function setAmountPerPerson(
     if (amount === null) return;
 
     // Someone who brought two unnamed friends owes three shares, so the new
-    // figure is applied per rider rather than per row. Left-joined because a due
-    // can exist without an attendance row only in the paid-then-unmarked case,
-    // and that person still owes their own share.
+    // figure is applied per rider rather than per row. Both joins are left
+    // joins: a due can exist with neither an attendance row nor a booking — a
+    // traveller claiming payment before anyone marked the bus — and that person
+    // still owes their own share. The attendance-then-booking fallback is the
+    // same order `guestsFor` uses, so one fare change cannot leave the two
+    // disagreeing.
     const existing = await tx
-      .select({ due: dues, guests: attendance.guests })
+      .select({ due: dues, guests: attendance.guests, bookedGuests: responses.guests })
       .from(dues)
       .leftJoin(
         attendance,
         and(eq(attendance.tripId, dues.tripId), eq(attendance.userId, dues.userId)),
       )
+      .leftJoin(
+        responses,
+        and(eq(responses.tripId, dues.tripId), eq(responses.userId, dues.userId)),
+      )
       .where(eq(dues.tripId, trip.id));
 
-    for (const { due, guests } of existing) {
-      const owed = amount * (1 + (guests ?? 0));
+    for (const { due, guests, bookedGuests } of existing) {
+      const owed = amount * (1 + (guests ?? bookedGuests ?? 0));
       if (due.amount === owed) continue;
       await tx
         .update(dues)

@@ -3,10 +3,12 @@ import { notFound } from "next/navigation";
 import { requireCoordinatorPage } from "@/lib/auth/coordinator";
 import { getTripById } from "@/lib/trips";
 import { getAddableTravellers, getTripLedger, totalsFor } from "@/lib/settle";
+import { getPossibleCollectors } from "@/lib/pay";
 import { formatRupees } from "@/lib/cost";
-import { formatClockTime, formatTime, formatTripDate } from "@/lib/format";
+import { formatClockTime, formatDateTime, formatTime, formatTripDate } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 import { PersonName } from "../../person-name";
+import { CollectorPicker, MyUpiForm } from "./collect-controls";
 import {
   AddTravellerForm,
   AmountForm,
@@ -32,16 +34,19 @@ export default async function TripSettlePage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireCoordinatorPage();
+  const me = await requireCoordinatorPage();
 
   const { id } = await params;
   const trip = await getTripById(id);
   if (!trip) notFound();
 
-  const [ledger, candidates] = await Promise.all([
+  const [ledger, candidates, collectors] = await Promise.all([
     getTripLedger(trip.id),
     getAddableTravellers(trip.id),
+    getPossibleCollectors(),
   ]);
+
+  const myUpiVpa = collectors.find((c) => c.id === me.id)?.upiVpa ?? null;
 
   const totals = totalsFor(ledger, trip.amountPerPerson);
   const cancelled = trip.status === "cancelled";
@@ -141,6 +146,42 @@ export default async function TripSettlePage({
             )}
           </section>
 
+          {/* Two gates stand between a traveller and a payment screen: an
+              announced fare, and somebody named to collect it. Both are
+              deliberate coordinator acts, so neither can happen by default and
+              nobody is ever sent money against a number the app guessed. */}
+          <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+            <div>
+              <h2 className="font-semibold">Collecting this week</h2>
+              <p className="mt-1 mb-3 text-sm text-slate-500">
+                Whoever is taking the fares. Travellers see their share and a UPI
+                link paying into this person — and see nothing at all until both
+                this and the amount are set.
+              </p>
+              <CollectorPicker
+                tripId={trip.id}
+                collectors={collectors}
+                currentId={trip.collectedByUserId}
+                currentVpa={trip.collectUpiVpa}
+              />
+            </div>
+
+            <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
+              <MyUpiForm current={myUpiVpa} />
+            </div>
+          </section>
+
+          {totals.claimed > 0 && (
+            <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+              <strong>
+                {totals.claimed} {totals.claimed === 1 ? "person says" : "people say"} they
+                have paid
+              </strong>{" "}
+              and {totals.claimed === 1 ? "is" : "are"} waiting to be ticked off.
+              Check your bank, then mark them paid below.
+            </p>
+          )}
+
           <section className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
             {ledger.length === 0 ? (
               <p className="p-6 text-center text-sm text-slate-500">
@@ -151,7 +192,13 @@ export default async function TripSettlePage({
                 {ledger.map((r) => (
                   <li
                     key={r.userId}
-                    className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
+                    // Tinted rather than sorted to the top: a coordinator working
+                    // down this list is usually looking for one name they just
+                    // saw a credit from, and a list that reorders itself under
+                    // them is harder to use than one they can scan.
+                    className={`flex flex-wrap items-center justify-between gap-3 px-4 py-3 ${
+                      r.claimed ? "bg-amber-50/70 dark:bg-amber-950/30" : ""
+                    }`}
                   >
                     <div className="min-w-0">
                       <PersonName
@@ -182,6 +229,24 @@ export default async function TripSettlePage({
                               this is the difference between "he never paid" and
                               "his mate paid for him". */}
                           {r.paidByName && ` · by ${r.paidByName}`}
+                        </div>
+                      )}
+                      {/* Their word, not a confirmation — the wording has to keep
+                          saying so, because this row looks a lot like a paid one
+                          and a coordinator skimming the list must not tick it off
+                          without checking the bank. */}
+                      {r.claimed && r.claimedAt && (
+                        <div className="text-xs text-amber-700 dark:text-amber-400">
+                          says they sent {formatRupees(r.claimedAmount ?? r.amount ?? 0)} ·{" "}
+                          {formatDateTime(r.claimedAt)} · not confirmed yet
+                          {r.claimedAmount !== null &&
+                            r.amount !== null &&
+                            r.claimedAmount !== r.amount && (
+                              <span className="font-medium">
+                                {" "}
+                                · now owes {formatRupees(r.amount)}
+                              </span>
+                            )}
                         </div>
                       )}
                     </div>
