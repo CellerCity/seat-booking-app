@@ -82,8 +82,10 @@ Travellers do not create accounts.
 
 1. Coordinator opens the poll and gets a **trip link**. They paste it into the WhatsApp group where the poll used to go.
 2. Traveller taps the link. First visit only, they are asked for their **phone number**.
-3. The number is matched against the pre-seeded roster. Match → identified. No match → short self-registration (name + phone), created `pending` for a coordinator to approve. See §4.1.
-4. Identity is stored in a signed HTTP-only cookie (1 year). Week two onward is a single tap.
+3. The number is matched against the pre-seeded roster. No match → short self-registration (name + phone), created `pending` for a coordinator to approve. See §4.1.
+4. A match is **shown back for confirmation** — name, batch year and the number typed — with "no, try a different number" beside it. The lookup writes nothing; only the confirmation sets the cookie. One wrong digit matches somebody else on a roster of fifty, and without this step the app silently becomes that person for a year: their booking, their withdrawal, their fare. The confirmation re-submits the phone number rather than a user id, so it creates no shortcut that did not already exist.
+5. Identity is stored in a signed HTTP-only cookie (1 year). Week two onward is a single tap.
+6. A **"Not you?"** control is visible wherever the identity is shown, including on the payment screen. A year-long cookie without an exit is a trap, not a convenience — the alternative for someone who mistyped is clearing their site data.
 
 Effort for the traveller is roughly the same as voting in a WhatsApp poll — two seconds slower on the first week only.
 
@@ -165,6 +167,8 @@ Postgres. Names are `snake_case`, all tables have `id uuid pk`, `created_at`, `u
 | `role` | enum | `traveller` \| `coordinator` |
 | `member_type` | enum | `regular` \| `guest`. **`guest` means interns and short-stay visitors only.** UG cross-over travellers are `regular` — coordinators decide case by case; the schema does not presume |
 | `affiliation` | text null | Free text, e.g. "UG — CSE", "Intern" |
+| `joining_year` | int null | The batch. Shown beside the name everywhere, because a group this size repeats names across intakes and the year is what tells two people apart. Nothing keys on it |
+| `upi_vpa` | text null | Their own UPI address, for the weeks they are collecting. Set once **by that person only** — a coordinator cannot edit another's, or one roster tap could redirect a week's fares. Normalized and lower-cased so nobody holds two |
 | `approval_status` | enum | `pending` \| `approved` \| `rejected` \| `blocked`. See §4.1, §4.2 |
 | `blocked_reason` | text null | Required when blocking |
 | `is_active` | bool | Soft-delete for people who've left |
@@ -182,6 +186,10 @@ Postgres. Names are `snake_case`, all tables have `id uuid pk`, `created_at`, `u
 | `locked_at` | timestamptz null | The moment of the contractor call |
 | `locked_by` | uuid null → users | |
 | `locked_count` | int null | Headcount snapshot at the moment of the contractor call |
+| `amount_per_person` | int null | Rupees each rider is asked for, typed in by a coordinator. **Null means nothing is payable** — the first of the two gates in §8.1 |
+| `collected_by_user_id` | uuid null → users | Which coordinator is taking the fares this week. The second gate |
+| `collect_upi_vpa` | text null | Snapshot of that coordinator's `upi_vpa` at the moment they were picked, so changing it later cannot rewrite an old trip's payee |
+| `collect_upi_name` | text null | Snapshot of their name, shown in the payment app |
 | `link_token` | text unique | The shareable slug pasted into WhatsApp; ≥128 bits of randomness so it cannot be guessed |
 | `notes` | text null | |
 
@@ -276,10 +284,11 @@ Unique on `(trip_id, user_id)`. One tick per person per trip — no leg dimensio
 | Column | Type | Notes |
 |---|---|---|
 | `trip_id`, `user_id` | uuid | |
-| `amount` | integer | Rupees |
+| `amount` | integer | Rupees. What they owe **now** — amended if the fare is corrected |
 | `breakdown` | jsonb | Total cost, rider count and shortfall, so a traveller can see how the number was reached |
 | `status` | enum | `unpaid` \| `claimed` \| `verified` \| `waived` |
-| `claimed_at` | timestamptz null | Traveller tapped "I've paid" |
+| `claimed_at` | timestamptz null | Traveller tapped "I've paid". A second tap does not reset it — a coordinator reads this timestamp |
+| `claimed_amount` | int null | Rupees they said they sent, frozen at that moment. A different fact from `amount`: keeping both is what lets the list say "claimed ₹150 · now ₹170" |
 | `verified_at` | timestamptz null | |
 | `verified_by` | uuid null → users | |
 | `paid_by_user_id` | uuid null → users | Set when someone paid on this person's behalf — routine, and a main source of tally drift today |
@@ -348,9 +357,21 @@ Rounding is **fixed at ₹1 and is not configurable** — no setting, no column,
 │   [   I'm going   ]  [ Not ]   │
 │                                │
 ├────────────────────────────────┤
-│  You owe ₹150                  │
-│  2 Aug trip · unpaid           │
-│   [ Pay via UPI ]   [ I paid ] │
+│  Your share                    │
+│         ₹340                   │
+│  2 seats × ₹170                │
+│                                │
+│  Paying as                     │
+│  Priya Nair 2023   [ Not you? ]│
+│  98765 43210                   │
+│                                │
+│  Paying                        │
+│  Rahul Menon · rahul@ybl       │
+│                                │
+│   [   Pay ₹340 by UPI    ]     │
+│         or scan                │
+│        ▓▓░▓░▓▓ (QR)            │
+│   [    I've sent ₹340    ]     │
 ├────────────────────────────────┤
 │  ▸ Past trips                  │
 └────────────────────────────────┘
@@ -364,8 +385,12 @@ Behaviour:
 - `blocked` — every route returns "your access has been removed, please speak to a coordinator".
 - After lock, booking — "The count is already locked. Your request goes to a coordinator; a seat isn't guaranteed."
 - After lock, withdrawing — "Cabs are already booked for this count. Withdrawing now means the others split the same cost between fewer people. Withdraw anyway?" (Only shown post-lock; the pre-lock version is gentler.)
-- Payment — UPI deep link with amount and reference note prefilled, **with the QR always rendered underneath** as a fallback. `upi://` intents are reliable in Android Chrome and patchier on iOS, so the QR is not optional.
-- "I paid" sets `claimed`, not `verified`. Only a coordinator can verify.
+- Payment — UPI deep link with amount and reference note prefilled, **with the QR always rendered underneath** as a fallback. `upi://` intents are reliable in Android Chrome and patchier on iOS, so the QR is not optional. The QR is generated from the payee address rather than uploaded, so there is no image to store and none to go stale.
+- **Two gates before anything is payable**: a coordinator has set `amount_per_person`, *and* a coordinator has been named to collect. Neither happens by default, so a traveller is never shown a figure the app guessed or an address nobody chose. Before both, the section says which one is missing.
+- **The collector rotates weekly.** Each coordinator stores their own `users.upi_vpa` once; a trip records `collected_by_user_id` and *snapshots* the address and name onto `trips.collect_upi_vpa` / `collect_upi_name`. The snapshot means changing your UPI ID later cannot rewrite who an old trip's payments were made to. Deliberately not configuration — an environment variable would mean a redeploy every week, and a stale placeholder would silently become the payee.
+- "I paid" sets `claimed`, not `verified`. Only a coordinator can verify. A `upi://` intent returns no callback, so the app genuinely cannot know money moved; the claim's job is to put that person in front of a coordinator with a timestamp. `dues.claimed_amount` freezes what they said they sent, so a fare corrected afterwards reads as "claimed ₹150, now ₹170" rather than a tick against a figure nobody paid.
+- A traveller may **retract their own claim** until it is verified, which is why the claim button needs no confirmation dialog.
+- **No payment gateway.** Considered and rejected: it requires merchant KYC for what is a student group collecting cab fare, settles T+1/T+2 (after the contractor needs paying), and settles into one registered account — which is incompatible with the weekly rotation above. Peer-to-peer UPI rotates for free and keeps the blast radius in §11.
 
 ### 8.2 Coordinator — Dashboard
 
@@ -427,8 +452,12 @@ Per trip: total cab cost, total collected, outstanding, this trip's rounding sho
 
 ### Public / traveller
 ```
-POST /api/identify                { phone }            → sets cookie, returns user or needs_registration
+POST /api/lookup                  { phone }            → returns the match for confirmation, or
+                                                        needs_registration. Writes nothing.
+POST /api/identify                { phone }            → confirmed: sets cookie. Takes the phone
+                                                        number again, never a user id.
 POST /api/register                { name, phone }       → creates `pending` user, sets cookie
+POST /api/sign-out                                      → clears the cookie ("Not you?")
 GET  /api/trip/:token                                   → trip + this user's response + dues
 POST /api/trip/:token/book
 POST /api/trip/:token/withdraw
