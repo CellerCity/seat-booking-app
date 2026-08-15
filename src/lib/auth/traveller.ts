@@ -65,13 +65,27 @@ export async function getCurrentTraveller(): Promise<User | null> {
   return user;
 }
 
-export type IdentifyResult =
-  | { status: "identified"; user: User }
+export type LookupResult =
+  | { status: "found"; user: User }
   | { status: "blocked"; user: User }
   | { status: "needs_registration"; phone: string };
 
-/** Match a typed phone number against the roster and remember it. */
-export async function identify(rawPhone: string): Promise<IdentifyResult> {
+/**
+ * Who a typed number belongs to — a read, and nothing more.
+ *
+ * Separate from `identify` on purpose. A digit typed wrong silently signs
+ * someone in as whoever owns that number, and everything after it — the
+ * booking, the withdrawal, the payment — is attributed to a person who never
+ * touched the app. So the number is looked up first and the match is shown back
+ * for confirmation ("You're Priya Nair, 2023 — yes, that's me"), and only the
+ * confirmation writes the cookie.
+ *
+ * The confirmation step re-submits the *phone number*, never a user id.
+ * Accepting an id would mean anyone who learned one could become that person
+ * with a single direct POST; requiring the number keeps the bar exactly where
+ * it already was.
+ */
+export async function lookupByPhone(rawPhone: string): Promise<LookupResult> {
   const phone = normalizePhone(rawPhone);
 
   const [user] = await db.select().from(users).where(eq(users.phone, phone)).limit(1);
@@ -79,17 +93,36 @@ export async function identify(rawPhone: string): Promise<IdentifyResult> {
   if (!user || !user.isActive) {
     return { status: "needs_registration", phone };
   }
-
   if (user.approvalStatus === "blocked") {
-    // No session is created — a blocked number cannot get a foothold.
     return { status: "blocked", user };
   }
 
+  return { status: "found", user };
+}
+
+export type IdentifyResult =
+  | { status: "identified"; user: User }
+  | { status: "blocked"; user: User }
+  | { status: "needs_registration"; phone: string };
+
+/**
+ * Confirmed: match the number again and remember it.
+ *
+ * Re-reads rather than trusting anything the confirmation screen carried back,
+ * so a block applied between the two steps still takes effect.
+ */
+export async function identify(rawPhone: string): Promise<IdentifyResult> {
+  const found = await lookupByPhone(rawPhone);
+
+  if (found.status === "needs_registration") return found;
+  // No session is created — a blocked number cannot get a foothold.
+  if (found.status === "blocked") return { status: "blocked", user: found.user };
+
   const s = await session();
-  s.userId = user.id;
+  s.userId = found.user.id;
   await s.save();
 
-  return { status: "identified", user };
+  return { status: "identified", user: found.user };
 }
 
 /**
